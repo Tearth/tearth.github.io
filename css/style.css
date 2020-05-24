@@ -628,6 +628,10 @@ button:not(:-moz-focusring):focus > .menu__btn-title {
 	width: 100%;
 }
 
+.content p {
+	line-height: 30px;
+}
+
 .content a,
 .warning a,
 .authorbox__description a {
@@ -805,7 +809,7 @@ button:not(:-moz-focusring):focus > .menu__btn-title {
 .authorbox {
 	padding: 25px 0;
 	margin-bottom: 25px;
-	line-height: 1.5;
+	line-height: 30px;
 	border-top: 1px solid #ebebeb;
 	border-bottom: 1px solid #ebebeb;
 }
@@ -1274,54 +1278,62 @@ textarea {
 	}
 }
 
-/* Comments */
 #comments {
     margin-top: 30px;
 }
 
 .gh-comment {
-  border: 1px solid #d1d5da;
-  margin-top: 15px;
+	border: 1px solid #d1d5da;
+	margin-top: 15px;
 }
 
 .gh-header {
-  display: flex;
-  color: #586069;
-  background-color: #f6f8fa;
-  border-bottom: 1px solid #d1d5da;
-  padding: 10px;
-  font-size: 85%;
+	display: flex;
+	color: #586069;
+	background-color: #f6f8fa;
+	border-bottom: 1px solid #d1d5da;
+	padding: 10px;
+	font-size: 85%;
 }
 
 .gh-username {
-  color: #586069;
+	color: #586069;
 }
 
 .gh-body {
-  padding: 10px 15px;
+	padding: 10px 15px;
 }
 
 .gh-body code {
   font-size: 120%;
 }
 .gh-body > div.highlight > pre {
-  padding: 10px;
-  color: lime;
-  font-size: 120%;
-  background-color: #000;
-  border-radius: 5px;
+	padding: 10px;
+	color: lime;
+	font-size: 120%;
+	background-color: #000;
+	border-radius: 5px;
 }
 
 .gh-comment p {
-  margin: 0px 0px 10px 0px;
+	margin: 0px 0px 10px 0px;
+	line-height: 30px;
 }
 .gh-comment p:last-child {
-  margin: 0;
+	margin: 0;
 }
 
 .gh-header > img {
-  width: 24px;
-  height: 24px;
-  margin-right: 10px;
-  vertical-align: middle;
+	width: 24px;
+	height: 24px;
+	margin-right: 10px;
+	vertical-align: middle;
+}
+
+.project-title {
+	font-weight: bold;
+}
+
+.project-details {
+	color: #7a8288;
 }
