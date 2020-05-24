@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Tearth&#39;s blog</title>
-    <link>https://tearth.dev/</link>
-    <description>Recent content on Tearth&#39;s blog</description>
+    <title>Category 2 on Tearth&#39;s blog</title>
+    <link>https://tearth.dev/categories/category-2/</link>
+    <description>Recent content in Category 2 on Tearth&#39;s blog</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
     <lastBuildDate>Mon, 21 Aug 2017 00:00:00 +0000</lastBuildDate>
     
-	<atom:link href="https://tearth.dev/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://tearth.dev/categories/category-2/index.xml" rel="self" type="application/rss+xml" />
     
     
     <item>

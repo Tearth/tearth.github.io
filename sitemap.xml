@@ -3,26 +3,48 @@
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
   <url>
-    <loc>https://tearth.dev/posts/my-first-post/</loc>
-    <lastmod>2020-05-23T23:37:17+02:00</lastmod>
+    <loc>https://tearth.dev/tags/another-test/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
   
   <url>
-    <loc>https://tearth.dev/posts/</loc>
-    <lastmod>2020-05-23T23:37:17+02:00</lastmod>
-  </url>
-  
-  <url>
-    <loc>https://tearth.dev/</loc>
-    <lastmod>2020-05-23T23:37:17+02:00</lastmod>
+    <loc>https://tearth.dev/blog/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
   
   <url>
     <loc>https://tearth.dev/categories/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/categories/category-1/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/categories/category-2/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/blog/my-first-post/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
   
   <url>
     <loc>https://tearth.dev/tags/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/tags/test/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
   
 </urlset>
