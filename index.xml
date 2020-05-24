@@ -13,10 +13,10 @@
     
     <item>
       <title>Example article title</title>
-      <link>https://tearth.dev/blog/my-first-post/</link>
+      <link>https://tearth.dev/post/my-first-post/</link>
       <pubDate>Mon, 21 Aug 2017 00:00:00 +0000</pubDate>
       
-      <guid>https://tearth.dev/blog/my-first-post/</guid>
+      <guid>https://tearth.dev/post/my-first-post/</guid>
       <description>&lt;p&gt;Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam odio libero, auctor nec leo ac, vestibulum posuere dui. Integer dignissim sapien eget tincidunt facilisis. Mauris maximus ipsum vitae elit vulputate, id efficitur tellus pretium. Duis ornare ornare tortor, at ultrices nisi porta vel. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Maecenas sed nibh posuere, iaculis purus vel, vestibulum lacus. Sed pellentesque finibus eleifend. Nullam vitae lectus sit amet diam varius porttitor ac eget lectus. Quisque vitae turpis pellentesque, malesuada erat in, aliquet lorem. Etiam pulvinar sapien vitae arcu pretium ultrices. Nulla sit amet fringilla elit, vitae vehicula massa. Morbi molestie vel lorem vitae fringilla. Sed efficitur vehicula metus ut dictum. Nunc et eros sit amet lorem convallis eleifend.&lt;/p&gt;</description>
     </item>
     

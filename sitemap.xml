@@ -8,11 +8,6 @@
   </url>
   
   <url>
-    <loc>https://tearth.dev/blog/</loc>
-    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
-  </url>
-  
-  <url>
     <loc>https://tearth.dev/categories/</loc>
     <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
@@ -28,7 +23,12 @@
   </url>
   
   <url>
-    <loc>https://tearth.dev/blog/my-first-post/</loc>
+    <loc>https://tearth.dev/post/my-first-post/</loc>
+    <lastmod>2017-08-21T00:00:00+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>https://tearth.dev/post/</loc>
     <lastmod>2017-08-21T00:00:00+00:00</lastmod>
   </url>
   
