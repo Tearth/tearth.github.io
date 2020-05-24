@@ -1,6 +1,0 @@
-[submodule "dev/themes/ananke"]
-	path = dev/themes/ananke
-	url = https://github.com/budparr/gohugo-theme-ananke.git
-[submodule "dev/themes/mainroad"]
-	path = dev/themes/mainroad
-	url = https://github.com/vimux/mainroad
