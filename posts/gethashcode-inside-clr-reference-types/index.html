@@ -48,7 +48,11 @@
 </span><span class=hl><span class=lnt>42
 </span></span><span class=lnt>43
 </span><span class=lnt>44
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=n>FCIMPL1</span><span class=p>(</span><span class=n>INT32</span><span class=p>,</span> <span class=n>ObjectNative</span><span class=o>::</span><span class=n>GetHashCode</span><span class=p>,</span> <span class=n>Object</span><span class=o>*</span> <span class=n>obj</span><span class=p>)</span> <span class=p>{</span>
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=c1>// Note that we obtain a sync block index without actually building a sync block.
+</span><span class=c1>// That&#39;s because a lot of objects are hashed, without requiring support for
+</span><span class=c1></span><span class=n>FCIMPL1</span><span class=p>(</span><span class=n>INT32</span><span class=p>,</span> <span class=n>ObjectNative</span><span class=o>::</span><span class=n>GetHashCode</span><span class=p>,</span> <span class=n>Object</span><span class=o>*</span> <span class=n>obj</span><span class=p>)</span> <span class=p>{</span>
 
     <span class=n>CONTRACTL</span>
     <span class=p>{</span>
@@ -87,10 +91,10 @@
                 <span class=p>}</span>
             <span class=p>}</span>
         <span class=p>}</span>
-    <span class=p>}</span>
-
-<span class=hl>    <span class=n>FC_INNER_RETURN</span><span class=p>(</span><span class=n>INT32</span><span class=p>,</span> <span class=n>GetHashCodeHelper</span><span class=p>(</span><span class=n>objRef</span><span class=p>));</span>
-</span><span class=p>}</span>
+<span class=hl>    <span class=p>}</span>
+</span>
+    <span class=n>FC_INNER_RETURN</span><span class=p>(</span><span class=n>INT32</span><span class=p>,</span> <span class=n>GetHashCodeHelper</span><span class=p>(</span><span class=n>objRef</span><span class=p>));</span>
+<span class=p>}</span>
 <span class=n>FCIMPLEND</span>
 </code></pre></td></tr></table></div></div><p>This is quite a nice piece of code, so let&rsquo;s stop for a moment. First, we need to know that every instance in .NET contains an internal field called &ldquo;SyncBlock Index&rdquo; - this is the index of the entry in internal CLR array, which contains things required for proper work in a multithread environment. By default, &ldquo;SyncBlock Index&rdquo; is set to -1 which means that the object isn&rsquo;t used for synchronization. If we will use <a href="https://docs.microsoft.com/en-us/dotnet/api/system.threading.monitor.enter?view=netcore-3.1">Monitor.Enter</a> with some object as a parameter, then a proper entry in the SyncBlock list will be created and associated.</p><p>Now, look at the code above. First, the CLR reads the header of instance and checks (<code>bits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX</code>) if the value of SyncBlock index targets entry in SyncBlock list or contains hashcode. The second one can be a bit misleading, but it&rsquo;s a smart optimization which allows reducing memory usage by using this field to store hash code if there is no any SyncBlock associated with an object.</p><p>The second condition (<code>bits & BIT_SBLK_IS_HASHCODE</code>) is more specific and checks if the SyncBlock index contains proper hash code. If yes, we can just return the value (because it means that something earlier generated and stored it). Otherwise, it means that there is already some SyncBlock entry created and associated with an object, so we can&rsquo;t read or store hash code here. In this case, hash code is stored inside SyncBlock entry to avoid conflict and that&rsquo;s why CLR reads entry using <code>SyncBlock *psb = objRef->PassiveGetSyncBlock();</code>. Then, hash code is read with <code>psb->GetHashCode()</code> and returned.</p><p>If the first condition (<code>bits & BIT_SBLK_IS_HASH_OR_SYNCBLKINDEX</code>) is false, then it means that hash code doesn&rsquo;t exist for the particular object and has to be generated. This is done by <code>FC_INNER_RETURN(INT32, GetHashCodeHelper(objRef));</code> line, where we can spot the <code>GetHashCodeHelper</code> call. Let&rsquo;s see what&rsquo;s inside:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
