@@ -30,7 +30,7 @@
         <span class=p>}</span>
     <span class=p>}</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>At first glance, everything looks ok (except that Garbage Collector will have hard times, but that&rsquo;s not the point of this article). Someone can think that&rsquo;s hard to break something in that short code. It turns out, however, that we have one serious bug here which you can see at the program result below:</p><pre><code>1577235169
+</code></pre></td></tr></table></div></div><p>At first glance, everything looks ok (<strong>except that Garbage Collector will have very hard times, but that&rsquo;s not the point of this article</strong>). Someone can think that&rsquo;s hard to break something in that short code. It turns out, however, that we have one serious bug here which you can see at the program result below:</p><pre><code>1577235169
 1577235169
 1577235169
 806707241
@@ -124,7 +124,7 @@
 </span><span class=c1>/// &lt;returns&gt;A 32-bit signed integer containing the amount of time in milliseconds that has passed since the last time the computer was started. &lt;/returns&gt;
 </span><span class=c1></span><span class=na>[__DynamicallyInvokable]</span>
 <span class=k>public</span> <span class=k>static</span> <span class=k>extern</span> <span class=kt>int</span> <span class=n>TickCount</span> <span class=p>{</span> <span class=p>[</span><span class=n>SecuritySafeCritical</span><span class=p>,</span> <span class=n>__DynamicallyInvokable</span><span class=p>,</span> <span class=n>MethodImpl</span><span class=p>(</span><span class=n>MethodImplOptions</span><span class=p>.</span><span class=n>InternalCall</span><span class=p>)]</span> <span class=k>get</span><span class=p>;</span> <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>To check which method works faster, I did a small benchmark which measures how much time will take a specified .NET platform to initialize <code>Random</code> class instance and get pseudo-random value.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table></div></div><p>To check which method works faster, I did a small benchmark (using <a href=https://github.com/dotnet/BenchmarkDotNet>BenchmarkDotNet</a> library) which measures how much time will take a specified .NET platform to initialize <code>Random</code> class instance and get pseudo-random value.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -145,28 +145,46 @@
 </span><span class=lnt>19
 </span><span class=lnt>20
 </span><span class=lnt>21
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>class</span> <span class=nc>Program</span>
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>using</span> <span class=nn>System</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Attributes</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Jobs</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Running</span><span class=p>;</span>
+
+<span class=k>namespace</span> <span class=nn>RandomBenchmark</span>
 <span class=p>{</span>
-    <span class=k>private</span> <span class=k>static</span> <span class=kt>int</span> <span class=n>Result</span><span class=p>;</span>
-    <span class=k>private</span> <span class=k>static</span> <span class=kt>int</span> <span class=n>IterationsCount</span> <span class=p>=</span> <span class=m>1000000</span><span class=p>;</span>
-
-    <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
+<span class=na>    [DisassemblyDiagnoser]</span>
+<span class=na>    [SimpleJob(RuntimeMoniker.NetCoreApp31)]</span>
+<span class=na>    [SimpleJob(RuntimeMoniker.Net472)]</span>
+    <span class=k>public</span> <span class=k>class</span> <span class=nc>RandomTest</span>
     <span class=p>{</span>
-        <span class=kt>var</span> <span class=n>stopWatch</span> <span class=p>=</span> <span class=k>new</span> <span class=n>Stopwatch</span><span class=p>();</span>
-        <span class=k>while</span> <span class=p>(</span><span class=k>true</span><span class=p>)</span>
+<span class=na>        [Benchmark]</span>
+        <span class=k>public</span> <span class=k>void</span> <span class=n>Test</span><span class=p>()</span>
         <span class=p>{</span>
-            <span class=n>stopWatch</span><span class=p>.</span><span class=n>Restart</span><span class=p>();</span>
-            <span class=k>for</span> <span class=p>(</span><span class=kt>var</span> <span class=n>i</span> <span class=p>=</span> <span class=m>0</span><span class=p>;</span> <span class=n>i</span> <span class=p>&lt;</span> <span class=n>IterationsCount</span><span class=p>;</span> <span class=n>i</span><span class=p>++)</span>
-            <span class=p>{</span>
-                <span class=kt>var</span> <span class=n>random</span> <span class=p>=</span> <span class=k>new</span> <span class=n>Random</span><span class=p>();</span>
-                <span class=n>Result</span> <span class=p>=</span> <span class=n>random</span><span class=p>.</span><span class=n>Next</span><span class=p>();</span>
-            <span class=p>}</span>
+            <span class=k>new</span> <span class=n>Random</span><span class=p>();</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
 
-            <span class=n>Console</span><span class=p>.</span><span class=n>WriteLine</span><span class=p>(</span><span class=n>stopWatch</span><span class=p>.</span><span class=n>ElapsedMilliseconds</span><span class=p>);</span>
+    <span class=k>class</span> <span class=nc>Program</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>BenchmarkRunner</span><span class=p>.</span><span class=n>Run</span><span class=p>&lt;</span><span class=n>RandomTest</span><span class=p>&gt;();</span>
         <span class=p>}</span>
     <span class=p>}</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>The results are interesting: on .NET Framework, assuming that we are doing 1000000 per test, it takes about 800 ms, where on .NET Core it&rsquo;s about 1800 ms. So we can say, that reading <a href="https://docs.microsoft.com/en-us/dotnet/api/system.environment.tickcount?view=netframework-4.7.2">Environment.TickCount</a> is still faster than using random generators to get the seed.</p><p>I did one additional test to check what results will generate our benchmark if the <code>Random</code> instance creation will be moved at the begin of <code>Main</code> method (so it will be created only once). It turned out that both platforms are running with more or less the same time - for the exact iterations count as above, it was 8 ms.</p><h2 id=summary>Summary</h2><p>Both platforms, .NET Framework and .NET Core, have different ways to implement <code>Random</code> class. The first one is faster and uses the system clock to generate a seed for generator - it&rsquo;s also more dangerous because it doesn&rsquo;t ensure that seeds will be different when creating frequently. The second platform depends on its internal random generators which are assigned to the threads - it&rsquo;s a bit slower, but guarantees that seeds will be well distributed.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net-framework/ rel=tag>.NET Framework</a></li><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/random/ rel=tag>Random</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>IT student. I enjoy everything related to .NET and low-level programming stuff (OSDev and microcontrollers). Sometimes I create AI and games. SpaceX fan.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/magic-behind-closures/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>Magic behind closures</p></a></div></nav><div id=comments><script>var id=6;var user_name="tearth";var repo_name="tearth.github.io";if(id)
+</code></pre></td></tr></table></div></div><pre><code>BenchmarkDotNet=v0.12.1, OS=Windows 10.0.18363.959 (1909/November2018Update/19H2)
+Intel Core i5-8300H CPU 2.30GHz (Coffee Lake), 1 CPU, 8 logical and 4 physical cores
+.NET Core SDK=5.0.100-preview.5.20279.10
+  [Host]        : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+  .NET 4.7.2    : .NET Framework 4.8 (4.8.4180.0), X64 RyuJIT
+  .NET Core 3.1 : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+</code></pre><table><thead><tr><th>Method</th><th>Job</th><th>Runtime</th><th align=right>Mean</th><th align=right>Error</th><th align=right>StdDev</th><th align=right>Code Size</th></tr></thead><tbody><tr><td>Test</td><td>.NET 4.7.2</td><td>.NET 4.7.2</td><td align=right>556.7 ns</td><td align=right>3.15 ns</td><td align=right>2.63 ns</td><td align=right>413 B</td></tr><tr><td>Test</td><td>.NET Core 3.1</td><td>.NET Core 3.1</td><td align=right>1,503.5 ns</td><td align=right>7.16 ns</td><td align=right>6.70 ns</td><td align=right>621 B</td></tr></tbody></table><p>The results are interesting: initialization of <code>Random</code> class instance on .NET Framework takes about three times faster than on .NET Core. It implies that reading <a href="https://docs.microsoft.com/en-us/dotnet/api/system.environment.tickcount?view=netframework-4.7.2">Environment.TickCount</a> is still faster than using random generators to get the seed.</p><h2 id=summary>Summary</h2><p>Both platforms, .NET Framework and .NET Core, have different ways to implement <code>Random</code> class. The first one is faster and uses the system clock to generate a seed for generator - it&rsquo;s also more dangerous because it doesn&rsquo;t ensure that seeds will be different when creating frequently. The second platform depends on its internal random generators which are assigned to the threads - it&rsquo;s a bit slower, but guarantees that seeds will be well distributed.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net-framework/ rel=tag>.NET Framework</a></li><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/random/ rel=tag>Random</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>IT student. I enjoy everything related to .NET and low-level programming stuff (OSDev and microcontrollers). Sometimes I create AI and games. SpaceX fan.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/magic-behind-closures/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>Magic behind closures</p></a></div></nav><div id=comments><script>var id=6;var user_name="tearth";var repo_name="tearth.github.io";if(id)
 {let url="https://github.com/"+user_name+"/"+repo_name+"/issues/"+id;let api_url="https://api.github.com/repos/"+user_name+"/"+repo_name+"/issues/"+id+"/comments";let link="<a href='"+url+"'>GitHub issue</a>";var commentsDiv=document.getElementById("comments");let xhr=new XMLHttpRequest();xhr.responseType="json";xhr.open("GET",api_url);xhr.setRequestHeader("Accept","application/vnd.github.v3.html+json");xhr.send();xhr.onload=function()
 {if(xhr.status!=200)
 {let errorText=document.createElement("p");errorText.innerHTML="<i>Comments for this post are not opened yet (or you have GitHub scripts disabled).</i>";commentsDiv.appendChild(errorText);}
