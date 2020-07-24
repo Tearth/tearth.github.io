@@ -671,7 +671,7 @@ PersonWithRef 3 hash code: -1101417530
 
     <span class=k>return</span> <span class=k>unchecked</span><span class=p>((</span><span class=kt>int</span><span class=p>)</span><span class=n>bits</span><span class=p>)</span> <span class=p>^</span> <span class=p>((</span><span class=kt>int</span><span class=p>)(</span><span class=n>bits</span> <span class=p>&gt;&gt;</span> <span class=m>32</span><span class=p>));</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><p>As we can see, <code>bool</code> type just returns 1 if it&rsquo;s set to true or 0 if it&rsquo;s set to false. On the other side, <code>float</code> and <code>double</code> are a bit more complex because of IEEE 754 nature - the number can be positively zero or negatively zero. It would have no sense to have different hash codes for them because from the human perspective both are equal. Additionally, <code>double</code> does XOR operation on both 32-bit halves, which is understandable because the hash code is 32-bit.</p><h2 id=benchmark>Benchmark</h2><p>As we can see, there is a lot of checks and other operations to calculate hash code for a value type, even if CLR uses a simple fast version of the algorithm. That&rsquo;s why we should always override <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> in value types and provide our version which will be much faster. Let&rsquo;s prove it by modifying the previous code by adding a simple benchmark:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</code></pre></td></tr></table></div></div><p>As we can see, <code>bool</code> type just returns 1 if it&rsquo;s set to true or 0 if it&rsquo;s set to false. On the other side, <code>float</code> and <code>double</code> are a bit more complex because of IEEE 754 nature - the number can be positively zero or negatively zero. It would have no sense to have different hash codes for them because from the human perspective both are equal. Additionally, <code>double</code> does XOR operation on both 32-bit halves, which is understandable because the hash code is 32-bit.</p><h2 id=benchmark>Benchmark</h2><p>As we can see, there is a lot of checks and other operations to calculate hash code for a value type, even if CLR uses a simple fast version of the algorithm. That&rsquo;s why we should always override <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> in value types and provide our version which will be much faster. Let&rsquo;s prove it by modifying the previous code by adding a simple benchmark (using <a href=https://github.com/dotnet/BenchmarkDotNet>BenchmarkDotNet</a> library):</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
@@ -712,66 +712,169 @@ PersonWithRef 3 hash code: -1101417530
 </span><span class=lnt>39
 </span><span class=lnt>40
 </span><span class=lnt>41
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>using</span> <span class=nn>System</span><span class=p>;</span>
-<span class=k>using</span> <span class=nn>System.Diagnostics</span><span class=p>;</span>
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>using</span> <span class=nn>BenchmarkDotNet.Attributes</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Jobs</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Running</span><span class=p>;</span>
 
 <span class=k>namespace</span> <span class=nn>GetHashCodeCore</span>
 <span class=p>{</span>
-    <span class=k>public</span> <span class=k>struct</span> <span class=nc>Person</span>
+    <span class=k>public</span> <span class=k>struct</span> <span class=nc>PersonWithoutGetHashCode</span>
     <span class=p>{</span>
         <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Age</span><span class=p>;</span>
         <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Height</span><span class=p>;</span>
         <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Weight</span><span class=p>;</span>
 
-        <span class=k>public</span> <span class=n>Person</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
+        <span class=k>public</span> <span class=n>PersonWithoutGetHashCode</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
         <span class=p>{</span>
             <span class=n>Age</span> <span class=p>=</span> <span class=n>age</span><span class=p>;</span>
             <span class=n>Height</span> <span class=p>=</span> <span class=n>height</span><span class=p>;</span>
             <span class=n>Weight</span> <span class=p>=</span> <span class=n>weight</span><span class=p>;</span>
         <span class=p>}</span>
     <span class=p>}</span>
+
+    <span class=k>public</span> <span class=k>struct</span> <span class=nc>PersonWithGetHashCode</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Age</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Height</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Weight</span><span class=p>;</span>
+
+        <span class=k>public</span> <span class=n>PersonWithGetHashCode</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>Age</span> <span class=p>=</span> <span class=n>age</span><span class=p>;</span>
+            <span class=n>Height</span> <span class=p>=</span> <span class=n>height</span><span class=p>;</span>
+            <span class=n>Weight</span> <span class=p>=</span> <span class=n>weight</span><span class=p>;</span>
+        <span class=p>}</span>
+
+        <span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=k>return</span> <span class=n>Age</span> <span class=p>^</span> <span class=n>Height</span> <span class=p>^</span> <span class=n>Weight</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+<span class=na>
+</span><span class=na>    [DisassemblyDiagnoser]</span>
+<span class=na>    [SimpleJob(RuntimeMoniker.NetCoreApp31)]</span>
+    <span class=k>public</span> <span class=k>class</span> <span class=nc>GetHashCodeTest</span>
+    <span class=p>{</span>
+        <span class=k>private</span> <span class=n>PersonWithoutGetHashCode</span> <span class=n>_personWithoutGetHashCode</span><span class=p>;</span>
+        <span class=k>private</span> <span class=n>PersonWithGetHashCode</span> <span class=n>_personWithGetHashCode</span><span class=p>;</span>
+<span class=na>
+</span><span class=na>        [Benchmark]</span>
+        <span class=k>public</span> <span class=k>void</span> <span class=n>TestPersonWithoutGetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=kt>var</span> <span class=n>result</span> <span class=p>=</span> <span class=n>_personWithoutGetHashCode</span><span class=p>.</span><span class=n>GetHashCode</span><span class=p>();</span>
+            <span class=n>_personWithoutGetHashCode</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithoutGetHashCode</span><span class=p>(</span><span class=n>result</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>50</span><span class=p>);</span>
+        <span class=p>}</span>
+<span class=na>
+</span><span class=na>        [Benchmark]</span>
+        <span class=k>public</span> <span class=k>void</span> <span class=n>TestPersonWithGetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=kt>var</span> <span class=n>result</span> <span class=p>=</span> <span class=n>_personWithGetHashCode</span><span class=p>.</span><span class=n>GetHashCode</span><span class=p>();</span>
+            <span class=n>_personWithGetHashCode</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithGetHashCode</span><span class=p>(</span><span class=n>result</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>50</span><span class=p>);</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
     <span class=k>class</span> <span class=nc>Program</span>
     <span class=p>{</span>
-        <span class=k>private</span> <span class=k>static</span> <span class=kt>int</span> <span class=n>Result</span><span class=p>;</span>
-
-        <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
+        <span class=k>public</span> <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
         <span class=p>{</span>
-            <span class=kt>var</span> <span class=n>p1</span> <span class=p>=</span> <span class=k>new</span> <span class=n>Person</span><span class=p>(</span><span class=m>20</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>50</span><span class=p>);</span>
-            <span class=kt>var</span> <span class=n>stopWatch</span> <span class=p>=</span> <span class=k>new</span> <span class=n>Stopwatch</span><span class=p>();</span>
-
-            <span class=k>while</span> <span class=p>(</span><span class=k>true</span><span class=p>)</span>
-            <span class=p>{</span>
-                <span class=n>stopWatch</span><span class=p>.</span><span class=n>Restart</span><span class=p>();</span>
-                <span class=k>for</span> <span class=p>(</span><span class=kt>var</span> <span class=n>i</span> <span class=p>=</span> <span class=m>0</span><span class=p>;</span> <span class=n>i</span> <span class=p>&lt;</span> <span class=m>40000000</span><span class=p>;</span> <span class=n>i</span><span class=p>++)</span>
-                <span class=p>{</span>
-                    <span class=n>Result</span> <span class=p>=</span> <span class=n>p1</span><span class=p>.</span><span class=n>GetHashCode</span><span class=p>();</span>
-                <span class=p>}</span>
-                <span class=n>stopWatch</span><span class=p>.</span><span class=n>Stop</span><span class=p>();</span>
-
-                <span class=n>Console</span><span class=p>.</span><span class=n>WriteLine</span><span class=p>(</span><span class=s>$&#34;Elapsed: {stopWatch.ElapsedMilliseconds} ms&#34;</span><span class=p>);</span>
-            <span class=p>}</span>
+            <span class=n>BenchmarkRunner</span><span class=p>.</span><span class=n>Run</span><span class=p>&lt;</span><span class=n>GetHashCodeTest</span><span class=p>&gt;();</span>
         <span class=p>}</span>
     <span class=p>}</span>
 <span class=p>}</span>
-</code></pre></td></tr></table></div></div><pre><code>Elapsed: 1029 ms
-Elapsed: 1018 ms
-Elapsed: 1020 ms
-Elapsed: 1034 ms
-Elapsed: 1016 ms
-</code></pre><p>Single test performs 40 milion iterations where each calculates hash code and stores result in the <code>Result</code> variable (with <a href=https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/volatile>volatile</a> keyword to prevent compiler from optimizations). Now let&rsquo;s override <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> with our simple and effective implementation:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
-</span><span class=lnt>2
-</span><span class=lnt>3
-</span><span class=lnt>4
-</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
-<span class=p>{</span>
-    <span class=k>return</span> <span class=n>Age</span> <span class=p>^</span> <span class=n>Height</span> <span class=p>^</span> <span class=n>Weight</span><span class=p>;</span>
-<span class=p>}</span>
-</code></pre></td></tr></table></div></div><pre><code>Elapsed: 10 ms
-Elapsed: 11 ms
-Elapsed: 10 ms
-Elapsed: 10 ms
-Elapsed: 10 ms
-</code></pre><p>The difference is very visible - default <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> (using CLR implementation) is 100 times slower than our. This is because CLR doesn&rsquo;t need to check anymore if some of the internal fields in the structure are a reference or there are some holes between them. We just XOR all fields and return the result.</p><h2 id=summary>Summary</h2><p>This is the last part of the short &ldquo;GetHashCode Inside CLR&rdquo; series. We saw how <code>GetHashCode</code> method is implemented for reference and value types inside Common Language Runtime and how exactly these values are calculated. I think knowledge about nuances like this can be really useful for developers and help them to better understand the language.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/clr/ rel=tag>CLR</a></li><li class=tags__item><a class="tags__link btn" href=/tags/gethashcode/ rel=tag>GetHashCode</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>IT student. I enjoy everything related to .NET and low-level programming stuff (OSDev and microcontrollers). Sometimes I create AI and games. SpaceX fan.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/gethashcode-inside-clr-reference-types/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>GetHashCode inside CLR: Reference types</p></a></div><div class="pager__item pager__item--next"><a class=pager__link href=/posts/magic-behind-closures/ rel=next><span class=pager__subtitle>Next&#8201;»</span><p class=pager__title>Magic behind closures</p></a></div></nav><div id=comments><script>var id=4;var user_name="tearth";var repo_name="tearth.github.io";if(id)
+</code></pre></td></tr></table></div></div><p>We have two similar structures - one with default <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> implementation and one with our own. Every benchmark does two things: first, it calculates hash code for the appropriate struct instance, and second, it creates a new one with the <code>Age</code> value stored in the <code>result</code> variable. This prevents the compiler from precalculating elements or doing other optimizations.</p><pre><code>BenchmarkDotNet=v0.12.1, OS=Windows 10.0.18363.959 (1909/November2018Update/19H2)
+Intel Core i5-8300H CPU 2.30GHz (Coffee Lake), 1 CPU, 8 logical and 4 physical cores
+.NET Core SDK=5.0.100-preview.5.20279.10
+  [Host]        : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+  .NET Core 3.1 : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+
+Job=.NET Core 3.1  Runtime=.NET Core 3.1
+</code></pre><table><thead><tr><th>Method</th><th align=right>Mean</th><th align=right>Error</th><th align=right>StdDev</th><th align=right>Code Size</th></tr></thead><tbody><tr><td>TestPersonWithoutGetHashCode</td><td align=right>29.6406 ns</td><td align=right>0.2940 ns</td><td align=right>0.2750 ns</td><td align=right>73 B</td></tr><tr><td>TestPersonWithGetHashCode</td><td align=right>0.1220 ns</td><td align=right>0.0065 ns</td><td align=right>0.0061 ns</td><td align=right>32 B</td></tr></tbody></table><p>The difference is very visible - default <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> (using CLR implementation) is several dozen times slower than our custom one. This is because CLR doesn&rsquo;t need to check anymore if some of the internal fields in the structure are a reference or there are some holes between them. We just XOR all fields and return the result.</p><p>Just for curious, we can check what assembly code has been generated for both methods. The first one is for <code>TestPersonWithoutGetHashCode</code>, and we can see that there is a lot of operations - this is just a preparations to call a <code>call 00007FFCA6AE3B50</code>, which is the internal call.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-asm data-lang=asm><span class=c>; GetHashCodeCore.GetHashCodeTest.TestPersonWithoutGetHashCode()
+</span><span class=c></span>       <span class=nf>push</span>      <span class=no>rsi</span>
+       <span class=nf>sub</span>       <span class=no>rsp</span><span class=p>,</span><span class=mi>20</span>
+       <span class=nf>mov</span>       <span class=no>rsi</span><span class=p>,</span><span class=no>rcx</span>
+       <span class=nf>mov</span>       <span class=no>rcx</span><span class=p>,</span><span class=no>offset</span> <span class=no>MT_GetHashCodeCore.PersonWithoutGetHashCode</span>
+       <span class=nf>call</span>      <span class=no>CORINFO_HELP_NEWSFAST</span>
+       <span class=nf>add</span>       <span class=no>rsi</span><span class=p>,</span><span class=mi>8</span>
+       <span class=nf>lea</span>       <span class=no>rcx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+       <span class=nf>mov</span>       <span class=no>rdx</span><span class=p>,[</span><span class=no>rsi</span><span class=p>]</span>
+       <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=p>],</span><span class=no>rdx</span>
+       <span class=nf>mov</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+       <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=no>edx</span>
+       <span class=nf>mov</span>       <span class=no>rcx</span><span class=p>,</span><span class=no>rax</span>
+       <span class=nf>call</span>      <span class=mi>00007</span><span class=no>FFCA6AE3B50</span>
+       <span class=nf>mov</span>       <span class=p>[</span><span class=no>rsi</span><span class=p>],</span><span class=no>eax</span>
+       <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>4</span><span class=p>],</span><span class=mi>0</span><span class=no>A0</span>
+       <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=mi>32</span>
+       <span class=nf>add</span>       <span class=no>rsp</span><span class=p>,</span><span class=mi>20</span>
+       <span class=nf>pop</span>       <span class=no>rsi</span>
+       <span class=nf>ret</span></code></pre></td></tr></table></div></div><p>The second one, related to <code>TestPersonWithGetHashCode</code>, has been inlined by the compiler and simply retrieves values from the struct instance and then does a XOR operation.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-asm data-lang=asm><span class=c>; GetHashCodeCore.GetHashCodeTest.TestPersonWithGetHashCode()
+</span><span class=c></span>       <span class=nf>add</span>       <span class=no>rcx</span><span class=p>,</span><span class=mi>18</span>
+       <span class=nf>mov</span>       <span class=no>rax</span><span class=p>,</span><span class=no>rcx</span>
+       <span class=nf>mov</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=p>]</span>
+       <span class=nf>xor</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>4</span><span class=p>]</span>
+       <span class=nf>xor</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+       <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=p>],</span><span class=no>edx</span>
+       <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>4</span><span class=p>],</span><span class=mi>0</span><span class=no>A0</span>
+       <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=mi>32</span>
+       <span class=nf>ret</span></code></pre></td></tr></table></div></div><h2 id=summary>Summary</h2><p>This is the last part of the short &ldquo;GetHashCode Inside CLR&rdquo; series. We saw how <code>GetHashCode</code> method is implemented for reference and value types inside Common Language Runtime and how exactly these values are calculated. I think knowledge about nuances like this can be really useful for developers and help them to better understand the language.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/clr/ rel=tag>CLR</a></li><li class=tags__item><a class="tags__link btn" href=/tags/gethashcode/ rel=tag>GetHashCode</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>IT student. I enjoy everything related to .NET and low-level programming stuff (OSDev and microcontrollers). Sometimes I create AI and games. SpaceX fan.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/gethashcode-inside-clr-reference-types/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>GetHashCode inside CLR: Reference types</p></a></div><div class="pager__item pager__item--next"><a class=pager__link href=/posts/magic-behind-closures/ rel=next><span class=pager__subtitle>Next&#8201;»</span><p class=pager__title>Magic behind closures</p></a></div></nav><div id=comments><script>var id=4;var user_name="tearth";var repo_name="tearth.github.io";if(id)
 {let url="https://github.com/"+user_name+"/"+repo_name+"/issues/"+id;let api_url="https://api.github.com/repos/"+user_name+"/"+repo_name+"/issues/"+id+"/comments";let link="<a href='"+url+"'>GitHub issue</a>";var commentsDiv=document.getElementById("comments");let xhr=new XMLHttpRequest();xhr.responseType="json";xhr.open("GET",api_url);xhr.setRequestHeader("Accept","application/vnd.github.v3.html+json");xhr.send();xhr.onload=function()
 {if(xhr.status!=200)
 {let errorText=document.createElement("p");errorText.innerHTML="<i>Comments for this post are not opened yet (or you have GitHub scripts disabled).</i>";commentsDiv.appendChild(errorText);}
