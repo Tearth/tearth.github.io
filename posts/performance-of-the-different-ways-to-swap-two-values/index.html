@@ -314,7 +314,7 @@
 </span><span class=c1></span>    <span class=n>IL_002c</span><span class=p>:</span> <span class=n>ret</span>
 
   <span class=p>}</span> <span class=c1>// end of method SwapTest::SwapXor
-</span></code></pre></td></tr></table></div></div><p>The thrid test is finally our tuple-based swap. Surprisingly, it&rsquo;s quite similar to the first one (where the temporary variables were used). First, both static fields <code>A</code> and <code>B</code> are loaded into the local variables <code>a</code> and <code>b</code>, then we have a series of <code>ldloc</code> and <code>stloc</code> instructions which also use a temporary variable called <code>V_2</code> to swap values.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span></code></pre></td></tr></table></div></div><p>The thrid test is finally our tuple-based swap. Surprisingly, it&rsquo;s quite similar to the first one (where the temporary variable was used). First, both static fields <code>A</code> and <code>B</code> are loaded into the local variables <code>a</code> and <code>b</code>, then we have a series of <code>ldloc</code> and <code>stloc</code> instructions which also use a temporary variable called <code>V_2</code> to swap values.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
 </span><span class=lnt> 2
 </span><span class=lnt> 3
 </span><span class=lnt> 4
