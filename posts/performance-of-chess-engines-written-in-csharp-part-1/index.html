@@ -1,0 +1,321 @@
+<!doctype html><html class=no-js lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=x-ua-compatible content="IE=edge"><title>Performance of chess engines written in C#, part 1 - Tearth's blog</title><script>(function(d,e){d[e]=d[e].replace("no-js","js");})(document.documentElement,"className");</script><meta name=description content="First part of the series about chess programming and engines written using C# and .NET Core platform."><meta property="og:title" content="Performance of chess engines written in C#, part 1"><meta property="og:description" content="First part of the series about chess programming and engines written using C# and .NET Core platform."><meta property="og:type" content="article"><meta property="og:url" content="https://tearth.dev/posts/performance-of-chess-engines-written-in-csharp-part-1/"><meta property="og:image" content="https://tearth.dev/img/card.jpg"><meta property="article:published_time" content="2020-09-20T00:00:00+00:00"><meta property="article:modified_time" content="2020-09-20T00:00:00+00:00"><meta name=twitter:card content="summary_large_image"><meta name=twitter:image content="https://tearth.dev/img/card.jpg"><meta name=twitter:title content="Performance of chess engines written in C#, part 1"><meta name=twitter:description content="First part of the series about chess programming and engines written using C# and .NET Core platform."><link rel=dns-prefetch href=//fonts.googleapis.com><link rel=dns-prefetch href=//fonts.gstatic.com><link rel=stylesheet href="https://fonts.googleapis.com/css?family=Open+Sans:400,400i,700"><link rel=stylesheet href=/css/bundle.min.css><link rel="shortcut icon" href=/favicon.ico><script type=application/javascript>var doNotTrack=false;if(!doNotTrack){window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;ga('create','UA-167505664-1','auto');ga('send','pageview');}</script><script async src=https://www.google-analytics.com/analytics.js></script></head><body class=body><div class="container container--outer"><header class=header><div class="container header__container"><div class=logo><a class=logo__link href=/ title="Tearth's blog" rel=home><div class=logo__title>Tearth's blog</div><div class=logo__tagline>.NET and low-level programming</div></a></div><div class=divider></div></div></header><div class="wrapper flex"><div class=primary><main class=main role=main><article class=post><header class=post__header><h1 class=post__title>Performance of chess engines written in C#, part 1</h1><div class="post__meta meta"><div class="meta__item-datetime meta__item"><svg class="meta__icon icon icon-time" width="16" height="14" viewBox="0 0 30 28"><path d="M15 0C7 0 1 6 1 14s6 14 14 14 14-6 14-14S23 0 15 0zm0 25C9 25 4 20 4 14S9 3 15 3s11 5 11 11-5 11-11 11zm1-18h-2v8.4l6.8 4.4L22 18l-6-3.8V7z"/></svg><time class=meta__text datetime=2020-09-20T00:00:00Z>2020-09-20</time></div><div class="meta__item-categories meta__item"><svg class="meta__icon icon icon-category" width="16" height="16" viewBox="0 0 16 16"><path d="m7 2 1 2h8v11H0V2z"/></svg><span class=meta__text><a class=meta__link href=/categories/chess-programming/ rel=category>Chess programming</a></span></div></div></header><div class="post__toc toc"><div class=toc__title>Page content</div><div class=toc__menu><nav id=TableOfContents><ul><li><a href=#bitboards-and-magic-bitboards>Bitboards and Magic Bitboards</a></li><li><a href=#regular-arrays-vs-stackalloc-expression>Regular arrays vs. stackalloc expression</a></li><li><a href=#copy-make-vs-make-undo>Copy-Make vs. Make-Undo</a></li><li><a href=#intrinsics-functions>Intrinsics functions</a></li><li><a href=#summary>Summary</a></li></ul></nav></div></div><div class="content post__content clearfix"><p>Last month was quite busy - I&rsquo;ve started a new project called Cosette, which is a brand new chess engine written in C# for .NET Core platform. It&rsquo;s not my first project of this kind (a few years ago I made <a href=https://github.com/Tearth/Proxima-b-2.0>Proxima b 2.0</a> (C#), together with even older <a href=https://github.com/Tearth/Proxima-b>Proxima b</a> (C++)), so using the gained experience I can finally write a few words about performance tips and tricks, especially in C# language.</p><h2 id=bitboards-and-magic-bitboards>Bitboards and Magic Bitboards</h2><p>My very first engine, <a href=https://github.com/Tearth/Proxima-b>Proxima b</a>, used array-based board representation - basically, there was a <a href=https://github.com/Tearth/Proxima-b/blob/master/Source/Board.cpp>Board</a> class which contained a two-dimensional char array field. If the specified cell contained a letter, it was a sign that we have some piece on this field. This is probably the simplest way to represent board state, but at the same time, very inefficient when generating moves. Let&rsquo;s see at <a href=https://github.com/Tearth/Proxima-b/blob/master/Source/PieceBase.cpp#L14>this method</a>:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=n>vector</span><span class=o>&lt;</span><span class=n>Move</span><span class=o>&gt;</span> <span class=n>PieceBase</span><span class=o>::</span><span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>Position</span> <span class=n>currentPos</span><span class=p>,</span> <span class=n>Board</span> <span class=n>board</span><span class=p>,</span> <span class=kt>int</span> <span class=n>x</span><span class=p>,</span> <span class=kt>int</span> <span class=n>y</span><span class=p>)</span> 
+<span class=p>{</span>
+    <span class=n>Position</span> <span class=n>currentMove</span><span class=p>;</span>
+    <span class=n>vector</span><span class=o>&lt;</span><span class=n>Move</span><span class=o>&gt;</span> <span class=n>availableMoves</span><span class=p>;</span>
+
+    <span class=k>for</span> <span class=p>(</span><span class=kt>int</span> <span class=n>i</span> <span class=o>=</span> <span class=mi>1</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=mi>8</span><span class=p>;</span> <span class=n>i</span><span class=o>++</span><span class=p>)</span>
+    <span class=p>{</span>
+        <span class=n>currentMove</span> <span class=o>=</span> <span class=n>currentPos</span> <span class=o>+</span> <span class=n>Position</span><span class=p>(</span><span class=n>x</span><span class=o>*</span><span class=n>i</span><span class=p>,</span> <span class=n>y</span><span class=o>*</span><span class=n>i</span><span class=p>);</span>
+        <span class=k>if</span> <span class=p>(</span><span class=n>board</span><span class=p>.</span><span class=n>IsPositionValid</span><span class=p>(</span><span class=n>currentMove</span><span class=p>))</span>
+        <span class=p>{</span>
+            <span class=kt>bool</span> <span class=n>canKill</span> <span class=o>=</span> <span class=n>board</span><span class=p>.</span><span class=n>CanKill</span><span class=p>(</span><span class=n>currentPos</span><span class=p>,</span> <span class=n>currentMove</span><span class=p>);</span>
+            <span class=k>if</span> <span class=p>(</span><span class=n>board</span><span class=p>.</span><span class=n>GetFieldAtPosition</span><span class=p>(</span><span class=n>currentMove</span><span class=p>)</span> <span class=o>==</span> <span class=sc>&#39;0&#39;</span> <span class=o>||</span> <span class=n>canKill</span><span class=p>)</span>
+            <span class=p>{</span>
+                <span class=n>availableMoves</span><span class=p>.</span><span class=n>push_back</span><span class=p>(</span><span class=n>Move</span><span class=p>(</span><span class=n>currentPos</span><span class=p>,</span> <span class=n>currentMove</span><span class=p>));</span>
+            <span class=p>}</span>
+            <span class=k>else</span>
+                <span class=k>break</span><span class=p>;</span>
+
+            <span class=k>if</span> <span class=p>(</span><span class=n>canKill</span><span class=p>)</span>
+                <span class=k>break</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=k>return</span> <span class=n>availableMoves</span><span class=p>;</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>This is the code used for sliding pieces when we want to generate available moves. Let&rsquo;s look at a <a href=https://github.com/Tearth/Proxima-b/blob/master/Source/Queen.cpp#L14>queen moves generator</a> now:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=n>vector</span><span class=o>&lt;</span><span class=n>Move</span><span class=o>&gt;</span> <span class=n>Queen</span><span class=o>::</span><span class=n>GetAvailableMoves</span><span class=p>(</span><span class=n>Board</span> <span class=n>board</span><span class=p>,</span> <span class=n>Position</span> <span class=n>pos</span><span class=p>,</span> <span class=n>EColor</span> <span class=n>color</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>vector</span><span class=o>&lt;</span><span class=n>Move</span><span class=o>&gt;</span> <span class=n>availableMoves</span><span class=p>;</span>
+
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=mi>1</span><span class=p>,</span> <span class=mi>0</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>,</span> <span class=mi>0</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=mi>0</span><span class=p>,</span> <span class=mi>1</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=mi>0</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>));</span>
+
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=mi>1</span><span class=p>,</span> <span class=mi>1</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=mi>1</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>));</span>
+    <span class=n>availableMoves</span> <span class=o>=</span> <span class=n>mergeMoves</span><span class=p>(</span><span class=n>availableMoves</span><span class=p>,</span> <span class=n>getMovesAtSide</span><span class=p>(</span><span class=n>pos</span><span class=p>,</span> <span class=n>board</span><span class=p>,</span> <span class=o>-</span><span class=mi>1</span><span class=p>,</span> <span class=mi>1</span><span class=p>));</span>
+
+    <span class=k>return</span> <span class=n>availableMoves</span><span class=p>;</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>It&rsquo;s not hard to find that it takes a lot of time to get these moves - and remember that we talk about processing millions of boards per second. That&rsquo;s why array-based representation is a very unfortunate thing for high-performance solutions. This is where bitboards gain the advantage - we store our state using 64-bit types like <code>ulong</code>, which allows using extremally fast bit arithmetic instructions like <code>and</code>, <code>or</code> and <code>xor</code>. What&rsquo;s more, using Magic Bitboards, we are able to precalculate moves for sliding pieces and probe them using <a href=https://github.com/Tearth/Cosette/tree/e433c8c9adfe92568f8585217a542db22688ad4/Cosette/Engine/Moves/Magic/MagicBitboards.cs#L26>this simple code</a>:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>public</span> <span class=k>static</span> <span class=kt>ulong</span> <span class=n>GetRookMoves</span><span class=p>(</span><span class=kt>ulong</span> <span class=n>board</span><span class=p>,</span> <span class=kt>int</span> <span class=n>fieldIndex</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>board</span> <span class=p>&amp;=</span> <span class=n>_rookMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Mask</span><span class=p>;</span>
+    <span class=n>board</span> <span class=p>*=</span> <span class=n>_rookMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>MagicNumber</span><span class=p>;</span>
+    <span class=n>board</span> <span class=p>&gt;&gt;=</span> <span class=n>_rookMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Shift</span><span class=p>;</span>
+    <span class=k>return</span> <span class=n>_rookMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Attacks</span><span class=p>[</span><span class=n>board</span><span class=p>];</span>
+<span class=p>}</span>
+
+<span class=k>public</span> <span class=k>static</span> <span class=kt>ulong</span> <span class=n>GetBishopMoves</span><span class=p>(</span><span class=kt>ulong</span> <span class=n>board</span><span class=p>,</span> <span class=kt>int</span> <span class=n>fieldIndex</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>board</span> <span class=p>&amp;=</span> <span class=n>_bishopMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Mask</span><span class=p>;</span>
+    <span class=n>board</span> <span class=p>*=</span> <span class=n>_bishopMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>MagicNumber</span><span class=p>;</span>
+    <span class=n>board</span> <span class=p>&gt;&gt;=</span> <span class=n>_bishopMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Shift</span><span class=p>;</span>
+    <span class=k>return</span> <span class=n>_bishopMagicArray</span><span class=p>[</span><span class=n>fieldIndex</span><span class=p>].</span><span class=n>Attacks</span><span class=p>[</span><span class=n>board</span><span class=p>];</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>Way more simple, right? I don&rsquo;t want to explain the whole algorithm, because it&rsquo;s quite complicated to understand and this is not the point of this article. Chess Programming Wiki have excellent articles about <a href=https://www.chessprogramming.org/Bitboards>Bitboards</a> and <a href=https://www.chessprogramming.org/Magic_Bitboards>Magic Bitboards</a>. A bit similar thing is with king and knight moves, where precalculating and probing moves is trivial (because they have very limited movement).</p><h2 id=regular-arrays-vs-stackalloc-expression>Regular arrays vs. stackalloc expression</h2><p>C# has an excellent feature called <a href=https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/operators/stackalloc>stackalloc</a> which allows making an array on the stack instead of the heap. This is a very important difference because we have to remember that Garbage Collector&rsquo;s work is very undesired during a search of the best move (GC has to stop the thread and analyze all heap objects to find which of them are no longer used). In Cosette, I use <a href=https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/operators/stackalloc>stackalloc</a> expression mainly to make arrays containing generated moves and their values (used later for sorting).</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=n>Span</span><span class=p>&lt;</span><span class=n>Move</span><span class=p>&gt;</span> <span class=n>moves</span> <span class=p>=</span> <span class=k>stackalloc</span> <span class=n>Move</span><span class=p>[</span><span class=m>128</span><span class=p>];</span>
+<span class=n>Span</span><span class=p>&lt;</span><span class=kt>int</span><span class=p>&gt;</span> <span class=n>moveValues</span> <span class=p>=</span> <span class=k>stackalloc</span> <span class=kt>int</span><span class=p>[</span><span class=m>128</span><span class=p>];</span>
+
+<span class=kt>var</span> <span class=n>movesCount</span> <span class=p>=</span> <span class=n>board</span><span class=p>.</span><span class=n>GetAvailableMoves</span><span class=p>(</span><span class=n>moves</span><span class=p>);</span>
+<span class=n>MoveOrdering</span><span class=p>.</span><span class=n>AssignValues</span><span class=p>(</span><span class=n>board</span><span class=p>,</span> <span class=n>moves</span><span class=p>,</span> <span class=n>moveValues</span><span class=p>,</span> <span class=n>movesCount</span><span class=p>,</span> <span class=n>depth</span><span class=p>,</span> <span class=n>entry</span><span class=p>);</span>
+</code></pre></td></tr></table></div></div><p>Because it&rsquo;s a part of negamax search, this piece of code is called very frequently - so allocating array on heap every time and cleaning it then would be a real nightmare for overall performance. Don&rsquo;t do it.</p><h2 id=copy-make-vs-make-undo>Copy-Make vs. Make-Undo</h2><p>We have a list of generated moves, so let&rsquo;s think about how to execute them. There are two main approaches:</p><ul><li><strong>Copy-Make</strong> - create a full copy of the board state and then apply a move. There is no need for any undo logic because reverting the state is about using the original state instead of the created copy. It&rsquo;s the most simple method, which at the same time is very memory-inefficient and insanely pressures Garbage Collector when writing in C#.</li><li><strong>Make-Undo</strong> - create a separate undo logic, which allows reverting board states using information about the move that has been made. Implementation details are heavily dependent on the engine architecture, move structure, etc.</li></ul><p>In <a href=https://github.com/Tearth/Proxima-b>Proxima b</a> and <a href=https://github.com/Tearth/Proxima-b-2.0>Proxima b 2.0</a> (C#), I was using the first approach due to my small experience with chess engines. It worked quite well and was simple to do, but both memory allocation on heap and copying data was a real bottleneck - even with using fast <a href="https://docs.microsoft.com/en-us/dotnet/api/system.buffer.blockcopy?view=netcore-3.1">Buffer.BlockCopy</a> in <a href=https://github.com/Tearth/Proxima-b-2.0>Proxima b 2.0</a>. In Cosette, I&rsquo;ve decided to try the second approach to reduce Garbage Collector pressure, which is a significant change in the engine architecture compared to the previous ones. First, let&rsquo;s see at the <a href=https://github.com/Tearth/Cosette/tree/e433c8c9adfe92568f8585217a542db22688ad4/Cosette/Engine/Moves/Move.cs>Move</a> structure:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>public</span> <span class=k>readonly</span> <span class=k>struct</span> <span class=nc>Move</span>
+<span class=p>{</span>
+    <span class=k>public</span> <span class=k>readonly</span> <span class=kt>byte</span> <span class=n>From</span><span class=p>;</span>
+    <span class=k>public</span> <span class=k>readonly</span> <span class=kt>byte</span> <span class=n>To</span><span class=p>;</span>
+    <span class=k>public</span> <span class=k>readonly</span> <span class=n>Piece</span> <span class=n>Piece</span><span class=p>;</span>
+    <span class=k>public</span> <span class=k>readonly</span> <span class=n>MoveFlags</span> <span class=n>Flags</span><span class=p>;</span>
+
+    <span class=c1>// Methods not related to the article
+</span><span class=c1></span>    <span class=c1>// ...
+</span><span class=c1></span><span class=p>}</span>
+<span class=na>
+</span><span class=na>[Flags]</span>
+<span class=k>public</span> <span class=k>enum</span> <span class=n>MoveFlags</span> <span class=p>:</span> <span class=kt>byte</span>
+<span class=p>{</span>
+    <span class=n>None</span> <span class=p>=</span> <span class=m>0</span><span class=p>,</span>
+    <span class=n>Kill</span> <span class=p>=</span> <span class=m>1</span><span class=p>,</span>
+    <span class=n>Castling</span> <span class=p>=</span> <span class=m>2</span><span class=p>,</span>
+    <span class=n>DoublePush</span> <span class=p>=</span> <span class=m>4</span><span class=p>,</span>
+    <span class=n>EnPassant</span> <span class=p>=</span> <span class=m>8</span><span class=p>,</span>
+    <span class=n>KnightPromotion</span> <span class=p>=</span> <span class=m>16</span><span class=p>,</span>
+    <span class=n>BishopPromotion</span> <span class=p>=</span> <span class=m>32</span><span class=p>,</span>
+    <span class=n>RookPromotion</span> <span class=p>=</span> <span class=m>64</span><span class=p>,</span>
+    <span class=n>QueenPromotion</span> <span class=p>=</span> <span class=m>128</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>The whole structure takes 32 bits, and what&rsquo;s more important, it contains only the most needed information. That&rsquo;s because:</p><ul><li>It reduces memory usage (especially in transposition tables where each entry contains the best move).</li><li>Not every generated move will be used due to pruning, so it doesn&rsquo;t make sense to calculate more things than necessary.</li></ul><p>So what things are missing? I&rsquo;ve decided to not store a piece that has been captured (this can be obtained when necessary during search or evaluation), there is no also an indicator if the move generates check or checkmate. Lack of the first one makes a bit more difficult to do an undo operation, so the engine has to store this information somewhere else. That&rsquo;s why board state in Cosette contains <a href=https://github.com/Tearth/Cosette/blob/e433c8c9adfe92568f8585217a542db22688ad4b/Cosette/Engine/Board/BoardState.cs#L29>a set of stacks</a> to store information which would be lost when making moves:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=n>Piece</span><span class=p>&gt;</span> <span class=n>_killedPieces</span><span class=p>;</span>
+<span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=kt>ulong</span><span class=p>&gt;</span> <span class=n>_enPassants</span><span class=p>;</span>
+<span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=n>Castling</span><span class=p>&gt;</span> <span class=n>_castlings</span><span class=p>;</span>
+<span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=n>Piece</span><span class=p>&gt;</span> <span class=n>_promotedPieces</span><span class=p>;</span>
+<span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=kt>ulong</span><span class=p>&gt;</span> <span class=n>_hashes</span><span class=p>;</span>
+<span class=k>private</span> <span class=k>readonly</span> <span class=n>FastStack</span><span class=p>&lt;</span><span class=kt>ulong</span><span class=p>&gt;</span> <span class=n>_pawnHashes</span><span class=p>;</span>
+</code></pre></td></tr></table></div></div><p>When making or undoing moves, these stacks are pushing or popping values, depending on the situation. <a href=https://github.com/Tearth/Cosette/blob/e433c8c9adfe92568f8585217a542db22688ad4b/Cosette/Engine/Common/FastStack.cs>FastStack</a> is a fast alternative for <a href="https://docs.microsoft.com/en-us/dotnet/api/system.collections.generic.stack-1?view=netcore-3.1">Stack</a> class - it has a fixed size which prevents from reallocating array during a search. Because we know what values are expected and how much, so it&rsquo;s not a problem.</p><p><a href=https://github.com/Tearth/Cosette/blob/e433c8c9adfe92568f8585217a542db22688ad4b/Cosette/Engine/Board/BoardState.cs#L138>MakeMove</a> and <a href=https://github.com/Tearth/Cosette/blob/e433c8c9adfe92568f8585217a542db22688ad4b/Cosette/Engine/Board/BoardState.cs#L375>UndoMove</a> in Cosette are a bit complex, so again, I won&rsquo;t go into implementation details. The main point of this chapter is: if possible, go with Make-Undo schema, because of the reduced pressure of Garbage Collector and time saved on the memory allocating/copying.</p><h2 id=intrinsics-functions>Intrinsics functions</h2><p>Since .NET Core 3.0, we have finally able to use BMI functions directly (a few months ago I wrote an article about them: <a href=http://localhost:1313/posts/performance-of-bit-manipulation-instructions-bmi/>Performance of Bit Manipulation Instructions (BMI)</a>). Because Bitboards and Magic Bitboards heavily depends on them, we can take an advantage from using them like this:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>public</span> <span class=k>static</span> <span class=k>class</span> <span class=nc>BitOperations</span>
+<span class=p>{</span>
+<span class=cp>#if !BMI
+</span><span class=cp></span>    <span class=k>private</span> <span class=k>static</span> <span class=kt>int</span><span class=p>[]</span> <span class=n>BitScanValues</span> <span class=p>=</span> <span class=p>{</span>
+        <span class=m>0</span><span class=p>,</span>  <span class=m>1</span><span class=p>,</span>  <span class=m>48</span><span class=p>,</span>  <span class=m>2</span><span class=p>,</span> <span class=m>57</span><span class=p>,</span> <span class=m>49</span><span class=p>,</span> <span class=m>28</span><span class=p>,</span>  <span class=m>3</span><span class=p>,</span>
+        <span class=m>61</span><span class=p>,</span> <span class=m>58</span><span class=p>,</span> <span class=m>50</span><span class=p>,</span> <span class=m>42</span><span class=p>,</span> <span class=m>38</span><span class=p>,</span> <span class=m>29</span><span class=p>,</span> <span class=m>17</span><span class=p>,</span>  <span class=m>4</span><span class=p>,</span>
+        <span class=m>62</span><span class=p>,</span> <span class=m>55</span><span class=p>,</span> <span class=m>59</span><span class=p>,</span> <span class=m>36</span><span class=p>,</span> <span class=m>53</span><span class=p>,</span> <span class=m>51</span><span class=p>,</span> <span class=m>43</span><span class=p>,</span> <span class=m>22</span><span class=p>,</span>
+        <span class=m>45</span><span class=p>,</span> <span class=m>39</span><span class=p>,</span> <span class=m>33</span><span class=p>,</span> <span class=m>30</span><span class=p>,</span> <span class=m>24</span><span class=p>,</span> <span class=m>18</span><span class=p>,</span> <span class=m>12</span><span class=p>,</span>  <span class=m>5</span><span class=p>,</span>
+        <span class=m>63</span><span class=p>,</span> <span class=m>47</span><span class=p>,</span> <span class=m>56</span><span class=p>,</span> <span class=m>27</span><span class=p>,</span> <span class=m>60</span><span class=p>,</span> <span class=m>41</span><span class=p>,</span> <span class=m>37</span><span class=p>,</span> <span class=m>16</span><span class=p>,</span>
+        <span class=m>54</span><span class=p>,</span> <span class=m>35</span><span class=p>,</span> <span class=m>52</span><span class=p>,</span> <span class=m>21</span><span class=p>,</span> <span class=m>44</span><span class=p>,</span> <span class=m>32</span><span class=p>,</span> <span class=m>23</span><span class=p>,</span> <span class=m>11</span><span class=p>,</span>
+        <span class=m>46</span><span class=p>,</span> <span class=m>26</span><span class=p>,</span> <span class=m>40</span><span class=p>,</span> <span class=m>15</span><span class=p>,</span> <span class=m>34</span><span class=p>,</span> <span class=m>20</span><span class=p>,</span> <span class=m>31</span><span class=p>,</span> <span class=m>10</span><span class=p>,</span>
+        <span class=m>25</span><span class=p>,</span> <span class=m>14</span><span class=p>,</span> <span class=m>19</span><span class=p>,</span>  <span class=m>9</span><span class=p>,</span> <span class=m>13</span><span class=p>,</span>  <span class=m>8</span><span class=p>,</span>  <span class=m>7</span><span class=p>,</span>  <span class=m>6</span>
+    <span class=p>};</span>
+<span class=cp>#endif
+</span><span class=cp></span>
+    <span class=k>public</span> <span class=k>static</span> <span class=kt>ulong</span> <span class=n>GetLsb</span><span class=p>(</span><span class=kt>ulong</span> <span class=k>value</span><span class=p>)</span>
+    <span class=p>{</span>
+<span class=cp>#if BMI
+</span><span class=cp></span>        <span class=k>return</span> <span class=n>Bmi1</span><span class=p>.</span><span class=n>X64</span><span class=p>.</span><span class=n>ExtractLowestSetBit</span><span class=p>(</span><span class=k>value</span><span class=p>);</span>
+<span class=cp>#else
+</span><span class=cp></span>        <span class=k>return</span> <span class=p>(</span><span class=kt>ulong</span><span class=p>)((</span><span class=kt>long</span><span class=p>)</span><span class=k>value</span> <span class=p>&amp;</span> <span class=p>-(</span><span class=kt>long</span><span class=p>)</span><span class=k>value</span><span class=p>);</span>
+<span class=cp>#endif
+</span><span class=cp></span>    <span class=p>}</span>
+
+    <span class=k>public</span> <span class=k>static</span> <span class=kt>ulong</span> <span class=n>PopLsb</span><span class=p>(</span><span class=kt>ulong</span> <span class=k>value</span><span class=p>)</span>
+    <span class=p>{</span>
+<span class=cp>#if BMI
+</span><span class=cp></span>        <span class=k>return</span> <span class=n>Bmi1</span><span class=p>.</span><span class=n>X64</span><span class=p>.</span><span class=n>ResetLowestSetBit</span><span class=p>(</span><span class=k>value</span><span class=p>);</span>
+<span class=cp>#else
+</span><span class=cp></span>        <span class=k>return</span> <span class=k>value</span> <span class=p>&amp;</span> <span class=p>(</span><span class=k>value</span> <span class=p>-</span> <span class=m>1</span><span class=p>);</span>
+<span class=cp>#endif
+</span><span class=cp></span>    <span class=p>}</span>
+
+    <span class=k>public</span> <span class=k>static</span> <span class=kt>ulong</span> <span class=n>Count</span><span class=p>(</span><span class=kt>ulong</span> <span class=k>value</span><span class=p>)</span>
+    <span class=p>{</span>
+<span class=cp>#if BMI
+</span><span class=cp></span>        <span class=k>return</span> <span class=n>Popcnt</span><span class=p>.</span><span class=n>X64</span><span class=p>.</span><span class=n>PopCount</span><span class=p>(</span><span class=k>value</span><span class=p>);</span>
+<span class=cp>#else
+</span><span class=cp></span>        <span class=kt>var</span> <span class=n>count</span> <span class=p>=</span> <span class=m>0</span><span class=n>ul</span><span class=p>;</span>
+        <span class=k>while</span> <span class=p>(</span><span class=k>value</span> <span class=p>&gt;</span> <span class=m>0</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=k>value</span> <span class=p>=</span> <span class=n>PopLsb</span><span class=p>(</span><span class=k>value</span><span class=p>);</span>
+            <span class=n>count</span><span class=p>++;</span>
+        <span class=p>}</span>
+
+        <span class=k>return</span> <span class=n>count</span><span class=p>;</span>
+<span class=cp>#endif
+</span><span class=cp></span>    <span class=p>}</span>
+
+    <span class=k>public</span> <span class=k>static</span> <span class=kt>int</span> <span class=n>BitScan</span><span class=p>(</span><span class=kt>ulong</span> <span class=k>value</span><span class=p>)</span>
+    <span class=p>{</span>
+<span class=cp>#if BMI
+</span><span class=cp></span>        <span class=k>return</span> <span class=p>(</span><span class=kt>int</span><span class=p>)</span> <span class=n>Bmi1</span><span class=p>.</span><span class=n>X64</span><span class=p>.</span><span class=n>TrailingZeroCount</span><span class=p>(</span><span class=k>value</span><span class=p>);</span>
+<span class=cp>#else
+</span><span class=cp></span>        <span class=k>return</span> <span class=n>BitScanValues</span><span class=p>[((</span><span class=kt>ulong</span><span class=p>)((</span><span class=kt>long</span><span class=p>)</span><span class=k>value</span> <span class=p>&amp;</span> <span class=p>-(</span><span class=kt>long</span><span class=p>)</span><span class=k>value</span><span class=p>)</span> <span class=p>*</span> <span class=m>0</span><span class=n>x03f79d71b4cb0a89</span><span class=p>)</span> <span class=p>&gt;&gt;</span> <span class=m>58</span><span class=p>];</span>
+<span class=cp>#endif
+</span><span class=cp></span>    <span class=p>}</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>It&rsquo;s crucial to remember that not every processor supports BMI instructions - so having both versions is a good solution. During the tests, I&rsquo;ve got about 10% better performance using BMI so it&rsquo;s worth try at leasat.</p><h2 id=summary>Summary</h2><p>This is the first part of the series about chess engines written in C# - next time, I will write something about transposition tables, and hopefully other things. Cosette is still in early development and lacks a lot of optimization, so hopefully there will be a ton of good knowledge to present. And in the meantime, feel free to play with my engine using <a href=https://lichess.org/@/CosetteBot>lichess platform</a>, or visit the <a href=https://github.com/Tearth/Cosette>GitHub repository</a>.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/.net-framework/ rel=tag>.NET Framework</a></li><li class=tags__item><a class="tags__link btn" href=/tags/chess/ rel=tag>Chess</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>IT student. I enjoy everything related to .NET and low-level programming stuff (OSDev and microcontrollers). Sometimes I create AI and games. SpaceX fan.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/performance-of-the-different-ways-to-swap-two-values/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>Performance of the different ways to swap two values</p></a></div></nav><div id=comments><script>var id=8;var user_name="tearth";var repo_name="tearth.github.io";if(id)
+{let url="https://github.com/"+user_name+"/"+repo_name+"/issues/"+id;let api_url="https://api.github.com/repos/"+user_name+"/"+repo_name+"/issues/"+id+"/comments";let link="<a href='"+url+"'>GitHub issue</a>";var commentsDiv=document.getElementById("comments");let xhr=new XMLHttpRequest();xhr.responseType="json";xhr.open("GET",api_url);xhr.setRequestHeader("Accept","application/vnd.github.v3.html+json");xhr.send();xhr.onload=function()
+{if(xhr.status!=200)
+{let errorText=document.createElement("p");errorText.innerHTML="<i>Comments for this post are not opened yet (or you have GitHub scripts disabled).</i>";commentsDiv.appendChild(errorText);}
+else
+{let comments=xhr.response;let mainHeader=document.createElement("h2");mainHeader.innerHTML="Comments: ".concat(comments.length);commentsDiv.appendChild(mainHeader);let issueLink=document.createElement("p");issueLink.innerHTML="<i>You can leave a comment using this <b>"+link+"</b>.</i>";commentsDiv.appendChild(issueLink);comments.forEach(function(comment)
+{let commentContent=document.createElement("div");commentContent.setAttribute('class','gh-comment')
+commentContent.innerHTML="".concat("<div class='gh-header'>","<img src='",comment.user.avatar_url,"' />","<div style='margin:auto 0;'>","<b><a class='gh-username' href='",comment.user.html_url,"'>",comment.user.login,"</a></b>"," commented at <em>",new Date(comment.created_at).toUTCString(),"</em>","</div>","</div>","<div class='gh-body'>",comment.body_html,"</div>");commentsDiv.appendChild(commentContent);});}};xhr.onerror=function()
+{let errorText=document.createElement("p");errorText.innerHTML="<i>Looks like the GitHub API limit exceeded! Go to "+link+" directly or wait 60 minutes to reset limits.</i>";commentsDiv.appendChild(errorText);};}</script></div></div><aside class=sidebar><div class="widget-categories widget"><h4 class=widget__title>Main projects</h4><div class=widget__content><ul class=widget__list><li class=widget__item><a class=widget__link href=https://github.com/Tearth/MicrOS><span class=project-title>MicrOS</span> - 32-bit operating system</a><div class=project-details>Language: C, Assembly. SLOC: 20000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/InElonWeTrust><span class=project-title>InElonWeTrust</span> - SpaceX Discord bot</a><div class=project-details>Language: C#. SLOC: 6000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Proxima-b-2.0><span class=project-title>Proxima b 2.0</span> - chess engine for BSc Thesis</a><div class=project-details>Language: C#. SLOC: 10000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/DotNet6502><span class=project-title>DotNet6502</span> - modular MOS 6502 emulator</a><div class=project-details>Language: C#. SLOC: 6000</div></li><li class=widget__item><a class=widget__link href="https://github.com/Tearth?tab=repositories">Full list of repositories</a></li></ul></div></div><div class="widget-categories widget"><h4 class=widget__title>Nuget packages</h4><div class=widget__content><ul class=widget__list><li class=widget__item><div><a class=widget__link href=https://github.com/Tearth/Oddity><span class=project-title>Oddity</span> - unofficial SpaceX API wrapper</a></div><div><a href=https://travis-ci.org/github/Tearth/Oddity><img src="https://img.shields.io/travis/Tearth/Oddity/master?style=flat-square&logo=travis-ci&logoColor=white&cacheSeconds=3600" alt="Oddity build"></a>
+<a href=https://www.nuget.org/packages/Oddity/><img src="https://img.shields.io/nuget/dt/Oddity.svg?style=flat-square&logo=nuget&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt="Oddity Nuget"></a>
+<a href=https://github.com/Tearth/Oddity/stargazers><img src="https://img.shields.io/github/stars/Tearth/Oddity.svg?style=flat-square&logo=github&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt="Oddity stargazers"></a></div><div class=project-details>Language: C#. SLOC: 3000</div></li><li class=widget__item><div><a class=widget__link href=https://github.com/Tearth/.NET-Launch-Dashboard><span class=project-title>.NET Launch Dashboard</span> - rocket telemetry</a></div><div><a href=https://travis-ci.org/github/Tearth/.NET-Launch-Dashboard><img src="https://img.shields.io/travis/Tearth/.NET-Launch-Dashboard/master?style=flat-square&logo=travis-ci&logoColor=white&cacheSeconds=3600" alt=".NET-Launch-Dashboard build"></a>
+<a href=https://www.nuget.org/packages/DotNetLaunchDashboard/><img src="https://img.shields.io/nuget/dt/DotNetLaunchDashboard.svg?style=flat-square&logo=nuget&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt=".NET-Launch-Dashboard Nuget"></a>
+<a href=https://github.com/Tearth/.NET-Launch-Dashboard/stargazers><img src="https://img.shields.io/github/stars/Tearth/.NET-Launch-Dashboard.svg?style=flat-square&logo=github&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt=".NET-Launch-Dashboard stargazers"></a></div><div class=project-details>Language: C#. SLOC: 500</div></li></ul></div></div><div class="widget-categories widget"><h4 class=widget__title>Categories</h4><div class=widget__content><ul class=widget__list><li class=widget__item><a class=widget__link href=/categories/.net-internals/>.NET internals (5)</a></li><li class=widget__item><a class=widget__link href=/categories/chess-programming/>Chess programming (1)</a></li><li class=widget__item><a class=widget__link href=/categories/performance-comparisons/>Performance comparisons (4)</a></li></ul></div></div><div class="widget-taglist widget"><h4 class=widget__title>Tags</h4><div class=widget__content><a class="widget-taglist__link widget__link btn" href=/tags/.net-core/ title=".NET Core">.NET Core (7)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/.net-framework/ title=".NET Framework">.NET Framework (2)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/assembly/ title=Assembly>Assembly (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/bmi/ title=BMI>BMI (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/c++/ title=C++>C++ (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/chess/ title=Chess>Chess (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/clr/ title=CLR>CLR (2)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/gethashcode/ title=GetHashCode>GetHashCode (2)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/random/ title=Random>Random (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/tuples/ title=Tuples>Tuples (1)</a></div></div><div class="widget-social widget"><h4 class="widget-social__title widget__title">Social</h4><div class="widget-social__content widget__content"><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=GitHub rel="noopener noreferrer" href=https://github.com/Tearth target=_blank><svg class="widget-social__link-icon icon icon-github" width="24" height="24" viewBox="0 0 384 374"><path d="m192 0C85.9.0.0 85.8.0 191.7c0 84.7 55 156.6 131.3 181.9 9.6 1.8 13.1-4.2 13.1-9.2.0-4.6-.2-16.6-.3-32.6-53.4 11.6-64.7-25.7-64.7-25.7-8.7-22.1-21.3-28-21.3-28-17.4-11.9 1.3-11.6 1.3-11.6 19.3 1.4 29.4 19.8 29.4 19.8 17.1 29.3 44.9 20.8 55.9 15.9 1.7-12.4 6.7-20.8 12.2-25.6-42.6-4.8-87.5-21.3-87.5-94.8.0-20.9 7.5-38 19.8-51.4-2-4.9-8.6-24.3 1.9-50.7.0.0 16.1-5.2 52.8 19.7 15.3-4.2 31.7-6.4 48.1-6.5 16.3.1 32.7 2.2 48.1 6.5 36.7-24.8 52.8-19.7 52.8-19.7 10.5 26.4 3.9 45.9 1.9 50.7 12.3 13.4 19.7 30.5 19.7 51.4.0 73.7-44.9 89.9-87.7 94.6 6.9 5.9 13 17.6 13 35.5.0 25.6-.2 46.3-.2 52.6.0 5.1 3.5 11.1 13.2 9.2 76.2-25.5 131.2-97.3 131.2-182 0-105.9-86-191.7-192-191.7z"/></svg><span>GitHub</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Twitter rel="noopener noreferrer" href=https://twitter.com/TearthDev target=_blank><svg class="widget-social__link-icon icon icon-twitter" width="24" height="24" viewBox="0 0 384 312"><path d="m384 36.9c-14.1 6.3-29.3 10.5-45.2 12.4 16.3-9.7 28.8-25.2 34.6-43.6-15.2 9-32.1 15.6-50 19.1-14.4-15.2-34.9-24.8-57.5-24.8-43.5.0-78.8 35.3-78.8 78.8.0 6.2.7 12.2 2 17.9-65.5-3.3-123.5-34.6-162.4-82.3-6.7 11.6-10.6 25.2-10.6 39.6.0 27.3 13.9 51.4 35 65.6-12.9-.4-25.1-4-35.7-9.9v1c0 38.2 27.2 70 63.2 77.2-6.6 1.8-13.6 2.8-20.8 2.8-5.1.0-10-.5-14.8-1.4 10 31.3 39.1 54.1 73.6 54.7-27 21.1-60.9 33.7-97.8 33.7-6.4.0-12.6-.4-18.8-1.1 34.9 22.4 76.3 35.4 120.8 35.4 144.9.0 224.1-120 224.1-224.1.0-3.4-.1-6.8-.2-10.2 15.4-11.1 28.7-25 39.3-40.8z"/></svg><span>Twitter</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Lichess rel="noopener noreferrer" href=https://lichess.org/@/Tearth target=_blank><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="widget-social__link-icon icon icon-lichess" width="24" height="24" viewBox="2 3 21 21"><g id="surface1"><path style="fill-rule:evenodd;fill:#fff;fill-opacity:1;stroke-width:0" d="M22.001953 9.997559C32.497559 11.000977 38.503418 18.00293 37.998047 39.001465H15C15 30 24.997559 32.497559 22.998047 18.00293" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#fff;fill-opacity:1;stroke-width:0" d="M24.001465 18.00293C24.382324 20.910645 18.449707 25.371094 16.003418 26.99707 13.000488 28.996582 13.183594 31.340332 11.000977 31.003418 9.960938 30.058594 12.407227 27.956543 11.000977 28.000488 9.997559 28.000488 11.191406 29.230957 9.997559 30 9.001465 30 5.998535 31.003418 5.998535 26.000977 5.998535 24.001465 11.99707 13.996582 11.99707 13.996582S13.886719 12.099609 13.996582 10.50293C13.271484 9.506836 13.498535 8.503418 13.498535 7.5 14.501953 6.496582 16.501465 9.997559 16.501465 9.997559H18.500977S19.277344 8.005371 20.998535 7.001953L22.001953 9.997559" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#000;fill-opacity:1;stroke-width:0" d="M9.499512 25.50293C9.499512 25.773926 9.279785 26.000977 9.001465 26.000977 8.723145 26.000977 8.503418 25.773926 8.503418 25.50293 8.503418 25.224609 8.723145 24.997559 9.001465 24.997559 9.279785 24.997559 9.499512 25.224609 9.499512 25.50293zm0 0" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#000;fill-opacity:1;stroke-width:0" d="M14.999472 15.496922C14.996821 16.32729 14.774506 16.996929 14.499265 17.003609 14.226704 17.000284 13.999306 16.328111 14.001958 15.497742 13.998266 14.671036 14.22058 14.001397 14.499484 14.00106 14.778388 14.000723 14.995781 14.670215 14.999472 15.496922zm0 0" transform="matrix(0.461867,0.266667,-0.266667,0.461867,5.1696,-2.758933)"/></g></svg><span>Lichess</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Email href=mailto:tearthdev@gmail.com><svg class="widget-social__link-icon icon icon-mail" width="24" height="24" viewBox="0 0 416 288"><path d="m0 16v256 16h16 384 16v-16V16 0h-16H16 0zm347 16-139 92.5L69 32zM199 157.5l9 5.5 9-5.5L384 46v210H32V46z"/></svg><span>tearthdev@gmail.com</span></a></div></div></div></aside></div><footer class=footer><div class="container footer__container flex"><div class=footer__copyright>&copy; 2020 Tearth.
+<span class=footer__copyright-credits>Generated with <a href=https://gohugo.io/ rel="nofollow noopener" target=_blank>Hugo</a> and <a href=https://github.com/Vimux/Mainroad/ rel="nofollow noopener" target=_blank>Mainroad</a> theme, hosted on <a href=https://pages.github.com/ rel="nofollow noopener" target=_blank>pages.github.com</a>.</span></div></div></footer></div></body></html>
