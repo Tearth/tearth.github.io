@@ -204,7 +204,7 @@ function shrBitboard(decTextbox) {
 
 function notBitboard(decTextbox) {
     var value = BigInt(decTextbox.val());
-    value = 18446744073709551615n - value;
+    value = 18446744073709551615n - value - 1n;
     decTextbox.val(value);
     
     refreshValuesAfterLayoutChange();
