@@ -4,7 +4,7 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "./dev/hugo.exe -D --source ./dev/ --minify ",
+            "command": "./dev/hugo.exe -D --source ./dev/ --destination ../. --minify ",
             "args": [],
             "group": {
                 "kind": "build"
