@@ -1,0 +1,904 @@
+<!doctype html><html class=no-js lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta http-equiv=x-ua-compatible content="IE=edge"><title>GetHashCode inside CLR: Value types - Tearth's homepage</title><script>(function(d,e){d[e]=d[e].replace("no-js","js");})(document.documentElement,"className");</script><meta name=description content="Magic hidden in the internal implementation of GetHashCode in CLR - how exactly this method works for reference and value types."><meta property="og:title" content="GetHashCode inside CLR: Value types"><meta property="og:description" content="Magic hidden in the internal implementation of GetHashCode in CLR - how exactly this method works for reference and value types."><meta property="og:type" content="article"><meta property="og:url" content="https://tearth.dev/posts/gethashcode-inside-clr-value-types/"><meta property="og:image" content="https://tearth.dev/img/card.jpg"><meta property="article:published_time" content="2020-06-15T00:00:00+00:00"><meta property="article:modified_time" content="2020-06-15T00:00:00+00:00"><meta name=twitter:card content="summary_large_image"><meta name=twitter:image content="https://tearth.dev/img/card.jpg"><meta name=twitter:title content="GetHashCode inside CLR: Value types"><meta name=twitter:description content="Magic hidden in the internal implementation of GetHashCode in CLR - how exactly this method works for reference and value types."><link rel=dns-prefetch href=//fonts.googleapis.com><link rel=dns-prefetch href=//fonts.gstatic.com><link rel=stylesheet href="https://fonts.googleapis.com/css?family=Open+Sans:400,400i,700"><link rel=stylesheet href=/css/bundle.min.css><link rel="shortcut icon" href=/favicon.ico><script type=application/javascript>var doNotTrack=false;if(!doNotTrack){window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;ga('create','UA-167505664-1','auto');ga('send','pageview');}</script><script async src=https://www.google-analytics.com/analytics.js></script></head><body class=body><div class="container container--outer"><header class=header><div class="container header__container"><div class=logo><a class=logo__link href=/ title="Tearth's homepage" rel=home><div class=logo__title>Tearth's homepage</div><div class=logo__tagline>Loosely updated site about everything I enjoy</div></a></div><div class=divider></div></div></header><div class="wrapper flex"><div class=primary><main class=main role=main><article class=post><header class=post__header><h1 class=post__title>GetHashCode inside CLR: Value types</h1><div class="post__meta meta"><div class="meta__item-datetime meta__item"><svg class="meta__icon icon icon-time" width="16" height="14" viewBox="0 0 30 28"><path d="M15 0C7 0 1 6 1 14s6 14 14 14 14-6 14-14S23 0 15 0zm0 25C9 25 4 20 4 14S9 3 15 3s11 5 11 11-5 11-11 11zm1-18h-2v8.4l6.8 4.4L22 18l-6-3.8V7z"/></svg><time class=meta__text datetime=2020-06-15T00:00:00Z>2020-06-15</time></div><div class="meta__item-categories meta__item"><svg class="meta__icon icon icon-category" width="16" height="16" viewBox="0 0 16 16"><path d="m7 2 1 2h8v11H0V2z"/></svg><span class=meta__text><a class=meta__link href=/categories/.net-internals/ rel=category>.NET internals</a>, <a class=meta__link href=/categories/performance-comparisons/ rel=category>Performance comparisons</a></span></div></div></header><div class="post__toc toc"><div class=toc__title>Page content</div><div class=toc__menu><nav id=TableOfContents><ul><li><a href=#inside-clr>Inside CLR</a></li><li><a href=#benchmark>Benchmark</a></li><li><a href=#summary>Summary</a></li></ul></nav></div></div><div class="content post__content clearfix"><p>In the <a href=https://tearth.dev/posts/gethashcode-inside-clr-reference-types/>previous article</a>, we talked a bit about hash codes and how they are implemented for reference types - it turned out that it&rsquo;s just a simple multiplication of thread ID and a random number. Today, we will do the same thing for value types, which are far more complex due to their representation in memory. In the end, I will show a small benchmark to prove that every struct defined by the programmer should override <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> method. Time to dig into <a href=https://github.com/dotnet/runtime>CLR source code</a>!</p><h2 id=inside-clr>Inside CLR</h2><p>Let&rsquo;s start in the same way as before. Reference type used <a href="https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.runtimehelpers.gethashcode?view=netcore-3.1">RuntimeHelpers.GetHashCode</a> within its <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">Object.GetHashCode</a> implementation to generate hash code. In value types, there is no any proxy - method is directly marked as implemented by CLR:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span><span class=lnt>2
+</span><span class=lnt>3
+</span><span class=lnt>4
+</span><span class=lnt>5
+</span><span class=lnt>6
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=c1>/// &lt;summary&gt;Returns the hash code for this instance.&lt;/summary&gt;
+</span><span class=c1>/// &lt;returns&gt;A 32-bit signed integer that is the hash code for this instance.&lt;/returns&gt;
+</span><span class=c1></span><span class=na>[SecuritySafeCritical]</span>
+<span class=na>[__DynamicallyInvokable]</span>
+<span class=na>[MethodImpl(MethodImplOptions.InternalCall)]</span>
+<span class=k>public</span> <span class=k>override</span> <span class=k>extern</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>();</span>
+</code></pre></td></tr></table></div></div><p>We can see a couple of interesting attributes which weren&rsquo;t present earlier. <a href="https://docs.microsoft.com/en-us/dotnet/api/system.security.securitysafecriticalattribute?view=netcore-3.1">SecuritySafeCritical</a> attribute indicates that method can be accessed by partially trusted types and members - but as we can read in the documentation, this doesn&rsquo;t have any effect in .NET Core. The next one is <code>__DynamicallyInvokable</code> attribute which is not officially documented, however basing on the <a href=https://github.com/dotnet/runtime/issues/30809>GitHub issue</a> and <a href=https://stackoverflow.com/a/12552079/12928142>StackOverflow post</a> we can assume that it&rsquo;s used to mark methods as compatible with some sort of internal Windows 8 optimization features. The third one, <a href="https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.methodimplattribute?view=netcore-3.1">MethodImplAttribute</a>, is already known for us and indicates that implementation is considered as part of the CLR itself. Mapping of C# method into native one in CLR can be found in <a href=https://github.com/dotnet/runtime/blob/master/src/coreclr/src/vm/ecalllist.h#L131>/src/coreclr/src/vm/ecalllist.h</a> file:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>1
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=n>FCFuncElement</span><span class=p>(</span><span class=s>&#34;GetHashCode&#34;</span><span class=p>,</span> <span class=n>ValueTypeHelper</span><span class=o>::</span><span class=n>GetHashCode</span><span class=p>)</span>
+</code></pre></td></tr></table></div></div><p>As the next step, we have to find a definition of the <code>ValueTypeHelper::GetHashCode</code> native method - it can be found in <a href=https://github.com/dotnet/runtime/blob/ab49e0f9dcd56958148827c6b47428b56187b5f8/src/coreclr/src/vm/comutilnative.cpp#L1984>/src/coreclr/src/vm/comutilnative.cpp</a> file:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=hl><span class=lnt>48
+</span></span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=hl><span class=lnt>53
+</span></span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=c1>// The default implementation of GetHashCode() for all value types.
+</span><span class=c1>// Note that this implementation reveals the value of the fields.
+</span><span class=c1>// So if the value type contains any sensitive information it should
+</span><span class=c1>// implement its own GetHashCode().
+</span><span class=c1></span><span class=n>FCIMPL1</span><span class=p>(</span><span class=n>INT32</span><span class=p>,</span> <span class=n>ValueTypeHelper</span><span class=o>::</span><span class=n>GetHashCode</span><span class=p>,</span> <span class=n>Object</span><span class=o>*</span> <span class=n>objUNSAFE</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>FCALL_CONTRACT</span><span class=p>;</span>
+
+    <span class=k>if</span> <span class=p>(</span><span class=n>objUNSAFE</span> <span class=o>==</span> <span class=nb>NULL</span><span class=p>)</span>
+        <span class=n>FCThrow</span><span class=p>(</span><span class=n>kNullReferenceException</span><span class=p>);</span>
+
+    <span class=n>OBJECTREF</span> <span class=n>obj</span> <span class=o>=</span> <span class=n>ObjectToOBJECTREF</span><span class=p>(</span><span class=n>objUNSAFE</span><span class=p>);</span>
+    <span class=n>VALIDATEOBJECTREF</span><span class=p>(</span><span class=n>obj</span><span class=p>);</span>
+
+    <span class=n>INT32</span> <span class=n>hashCode</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+    <span class=n>MethodTable</span> <span class=o>*</span><span class=n>pMT</span> <span class=o>=</span> <span class=n>objUNSAFE</span><span class=o>-&gt;</span><span class=n>GetMethodTable</span><span class=p>();</span>
+
+    <span class=c1>// We don&#39;t want to expose the method table pointer in the hash code
+</span><span class=c1></span>    <span class=c1>// Let&#39;s use the typeID instead.
+</span><span class=c1></span>    <span class=n>UINT32</span> <span class=n>typeID</span> <span class=o>=</span> <span class=n>pMT</span><span class=o>-&gt;</span><span class=n>LookupTypeID</span><span class=p>();</span>
+    <span class=k>if</span> <span class=p>(</span><span class=n>typeID</span> <span class=o>==</span> <span class=n>TypeIDProvider</span><span class=o>::</span><span class=n>INVALID_TYPE_ID</span><span class=p>)</span>
+    <span class=p>{</span>
+        <span class=c1>// If the typeID has yet to be generated, fall back to GetTypeID
+</span><span class=c1></span>        <span class=c1>// This only needs to be done once per MethodTable
+</span><span class=c1></span>        <span class=n>HELPER_METHOD_FRAME_BEGIN_RET_1</span><span class=p>(</span><span class=n>obj</span><span class=p>);</span>
+        <span class=n>typeID</span> <span class=o>=</span> <span class=n>pMT</span><span class=o>-&gt;</span><span class=n>GetTypeID</span><span class=p>();</span>
+        <span class=n>HELPER_METHOD_FRAME_END</span><span class=p>();</span>
+    <span class=p>}</span>
+
+    <span class=c1>// To get less colliding and more evenly distributed hash codes,
+</span><span class=c1></span>    <span class=c1>// we munge the class index with two big prime numbers
+</span><span class=c1></span>    <span class=n>hashCode</span> <span class=o>=</span> <span class=n>typeID</span> <span class=o>*</span> <span class=mi>711650207</span> <span class=o>+</span> <span class=mi>2506965631U</span><span class=p>;</span>
+
+    <span class=n>BOOL</span> <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>FALSE</span><span class=p>;</span>
+    <span class=k>if</span> <span class=p>(</span><span class=n>pMT</span><span class=o>-&gt;</span><span class=n>HasCheckedCanCompareBitsOrUseFastGetHashCode</span><span class=p>())</span>
+    <span class=p>{</span>
+        <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>pMT</span><span class=o>-&gt;</span><span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>();</span>
+    <span class=p>}</span>
+    <span class=k>else</span>
+    <span class=p>{</span>
+        <span class=n>HELPER_METHOD_FRAME_BEGIN_RET_1</span><span class=p>(</span><span class=n>obj</span><span class=p>);</span>
+        <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>(</span><span class=n>pMT</span><span class=p>);</span>
+        <span class=n>HELPER_METHOD_FRAME_END</span><span class=p>();</span>
+    <span class=p>}</span>
+
+    <span class=k>if</span> <span class=p>(</span><span class=n>canUseFastGetHashCodeHelper</span><span class=p>)</span>
+    <span class=p>{</span>
+<span class=hl>        <span class=n>hashCode</span> <span class=o>^=</span> <span class=n>FastGetValueTypeHashCodeHelper</span><span class=p>(</span><span class=n>pMT</span><span class=p>,</span> <span class=n>obj</span><span class=o>-&gt;</span><span class=n>UnBox</span><span class=p>());</span>
+</span>    <span class=p>}</span>
+    <span class=k>else</span>
+    <span class=p>{</span>
+        <span class=n>HELPER_METHOD_FRAME_BEGIN_RET_1</span><span class=p>(</span><span class=n>obj</span><span class=p>);</span>
+<span class=hl>        <span class=n>hashCode</span> <span class=o>^=</span> <span class=n>RegularGetValueTypeHashCode</span><span class=p>(</span><span class=n>pMT</span><span class=p>,</span> <span class=n>obj</span><span class=o>-&gt;</span><span class=n>UnBox</span><span class=p>());</span>
+</span>        <span class=n>HELPER_METHOD_FRAME_END</span><span class=p>();</span>
+    <span class=p>}</span>
+
+    <span class=k>return</span> <span class=n>hashCode</span><span class=p>;</span>
+<span class=p>}</span>
+<span class=n>FCIMPLEND</span>
+</code></pre></td></tr></table></div></div><p>First, CLR prepares and reads the ID of the target type using the <code>GetTypeID</code> method - it&rsquo;s used to calculate the base hash code (<code>hashCode = typeID * 711650207 + 2506965631U</code>) which will be proceeded later with the algorithm appropriate for the situation.</p><p>Now, we have a set of mysterious methods which check what exactly do we have to do now with our calculated earlier hash code:</p><ul><li><a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L1069>pMT->HasCheckedCanCompareBitsOrUseFastGetHashCode</a> - returns true the specified type contains <a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L313>enum_flag_CanCompareBitsOrUseFastGetHashCode</a> flag with valid value.</li><li><a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L1046>pMT->CanCompareBitsOrUseFastGetHashCode</a> - returns true if the <a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L313>enum_flag_CanCompareBitsOrUseFastGetHashCode</a> flag is set - it means, that the specified type is simple and its byte representation can be directly used to generate hash code or comparison.</li><li><a href=https://github.com/dotnet/runtime/blob/ab49e0f9dcd56958148827c6b47428b56187b5f8/src/coreclr/src/vm/comutilnative.cpp#L1734>CanCompareBitsOrUseFastGetHashCode(pMT)</a> - checks if the type is simple and its bytes can be directly used to generate hash code or comparison.</li></ul><p>CLR implements two different ways to calculate hash code for value types: <strong>fast</strong> and <strong>regular</strong>. The first one is the simplest because it operates directly on the bytes in memory which represents the specified type instance. The second one is more complex because it has to deal with the internal reference types, but I will describe it more later. Now we will try to find out how do we know which algorithm from those two should we use. Let&rsquo;s see the <a href=https://github.com/dotnet/runtime/blob/ab49e0f9dcd56958148827c6b47428b56187b5f8/src/coreclr/src/vm/comutilnative.cpp#L1734>CanCompareBitsOrUseFastGetHashCode(pMT)</a> implementation:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=k>static</span> <span class=n>BOOL</span> <span class=nf>CanCompareBitsOrUseFastGetHashCode</span><span class=p>(</span><span class=n>MethodTable</span><span class=o>*</span> <span class=n>mt</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>CONTRACTL</span>
+    <span class=p>{</span>
+        <span class=n>THROWS</span><span class=p>;</span>
+        <span class=n>GC_TRIGGERS</span><span class=p>;</span>
+        <span class=n>MODE_COOPERATIVE</span><span class=p>;</span>
+    <span class=p>}</span> <span class=n>CONTRACTL_END</span><span class=p>;</span>
+
+    <span class=n>_ASSERTE</span><span class=p>(</span><span class=n>mt</span> <span class=o>!=</span> <span class=nb>NULL</span><span class=p>);</span>
+
+    <span class=k>if</span> <span class=p>(</span><span class=n>mt</span><span class=o>-&gt;</span><span class=n>HasCheckedCanCompareBitsOrUseFastGetHashCode</span><span class=p>())</span>
+    <span class=p>{</span>
+        <span class=k>return</span> <span class=n>mt</span><span class=o>-&gt;</span><span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>();</span>
+    <span class=p>}</span>
+
+    <span class=k>if</span> <span class=p>(</span><span class=n>mt</span><span class=o>-&gt;</span><span class=n>ContainsPointers</span><span class=p>()</span>
+        <span class=o>||</span> <span class=n>mt</span><span class=o>-&gt;</span><span class=n>IsNotTightlyPacked</span><span class=p>())</span>
+    <span class=p>{</span>
+        <span class=n>mt</span><span class=o>-&gt;</span><span class=n>SetHasCheckedCanCompareBitsOrUseFastGetHashCode</span><span class=p>();</span>
+        <span class=k>return</span> <span class=n>FALSE</span><span class=p>;</span>
+    <span class=p>}</span>
+
+    <span class=n>MethodTable</span><span class=o>*</span> <span class=n>valueTypeMT</span> <span class=o>=</span> <span class=n>MscorlibBinder</span><span class=o>::</span><span class=n>GetClass</span><span class=p>(</span><span class=n>CLASS__VALUE_TYPE</span><span class=p>);</span>
+    <span class=n>WORD</span> <span class=n>slotEquals</span> <span class=o>=</span> <span class=n>MscorlibBinder</span><span class=o>::</span><span class=n>GetMethod</span><span class=p>(</span><span class=n>METHOD__VALUE_TYPE__EQUALS</span><span class=p>)</span><span class=o>-&gt;</span><span class=n>GetSlot</span><span class=p>();</span>
+    <span class=n>WORD</span> <span class=n>slotGetHashCode</span> <span class=o>=</span> <span class=n>MscorlibBinder</span><span class=o>::</span><span class=n>GetMethod</span><span class=p>(</span><span class=n>METHOD__VALUE_TYPE__GET_HASH_CODE</span><span class=p>)</span><span class=o>-&gt;</span><span class=n>GetSlot</span><span class=p>();</span>
+
+    <span class=c1>// Check the input type.
+</span><span class=c1></span>    <span class=k>if</span> <span class=p>(</span><span class=n>HasOverriddenMethod</span><span class=p>(</span><span class=n>mt</span><span class=p>,</span> <span class=n>valueTypeMT</span><span class=p>,</span> <span class=n>slotEquals</span><span class=p>)</span>
+        <span class=o>||</span> <span class=n>HasOverriddenMethod</span><span class=p>(</span><span class=n>mt</span><span class=p>,</span> <span class=n>valueTypeMT</span><span class=p>,</span> <span class=n>slotGetHashCode</span><span class=p>))</span>
+    <span class=p>{</span>
+        <span class=n>mt</span><span class=o>-&gt;</span><span class=n>SetHasCheckedCanCompareBitsOrUseFastGetHashCode</span><span class=p>();</span>
+
+        <span class=c1>// If overridden Equals or GetHashCode found, stop searching further.
+</span><span class=c1></span>        <span class=k>return</span> <span class=n>FALSE</span><span class=p>;</span>
+    <span class=p>}</span>
+
+    <span class=n>BOOL</span> <span class=n>canCompareBitsOrUseFastGetHashCode</span> <span class=o>=</span> <span class=n>TRUE</span><span class=p>;</span>
+
+    <span class=c1>// The type itself did not override Equals or GetHashCode, go for its fields.
+</span><span class=c1></span>    <span class=n>ApproxFieldDescIterator</span> <span class=n>iter</span> <span class=o>=</span> <span class=n>ApproxFieldDescIterator</span><span class=p>(</span><span class=n>mt</span><span class=p>,</span> <span class=n>ApproxFieldDescIterator</span><span class=o>::</span><span class=n>INSTANCE_FIELDS</span><span class=p>);</span>
+    <span class=k>for</span> <span class=p>(</span><span class=n>FieldDesc</span><span class=o>*</span> <span class=n>pField</span> <span class=o>=</span> <span class=n>iter</span><span class=p>.</span><span class=n>Next</span><span class=p>();</span> <span class=n>pField</span> <span class=o>!=</span> <span class=nb>NULL</span><span class=p>;</span> <span class=n>pField</span> <span class=o>=</span> <span class=n>iter</span><span class=p>.</span><span class=n>Next</span><span class=p>())</span>
+    <span class=p>{</span>
+        <span class=k>if</span> <span class=p>(</span><span class=n>pField</span><span class=o>-&gt;</span><span class=n>GetFieldType</span><span class=p>()</span> <span class=o>==</span> <span class=n>ELEMENT_TYPE_VALUETYPE</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=c1>// Check current field type.
+</span><span class=c1></span>            <span class=n>MethodTable</span><span class=o>*</span> <span class=n>fieldMethodTable</span> <span class=o>=</span> <span class=n>pField</span><span class=o>-&gt;</span><span class=n>GetApproxFieldTypeHandleThrowing</span><span class=p>().</span><span class=n>GetMethodTable</span><span class=p>();</span>
+            <span class=k>if</span> <span class=p>(</span><span class=o>!</span><span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>(</span><span class=n>fieldMethodTable</span><span class=p>))</span>
+            <span class=p>{</span>
+                <span class=n>canCompareBitsOrUseFastGetHashCode</span> <span class=o>=</span> <span class=n>FALSE</span><span class=p>;</span>
+                <span class=k>break</span><span class=p>;</span>
+            <span class=p>}</span>
+        <span class=p>}</span>
+        <span class=k>else</span> <span class=k>if</span> <span class=p>(</span><span class=n>pField</span><span class=o>-&gt;</span><span class=n>GetFieldType</span><span class=p>()</span> <span class=o>==</span> <span class=n>ELEMENT_TYPE_R8</span>
+                <span class=o>||</span> <span class=n>pField</span><span class=o>-&gt;</span><span class=n>GetFieldType</span><span class=p>()</span> <span class=o>==</span> <span class=n>ELEMENT_TYPE_R4</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=c1>// We have double/single field, cannot compare in fast path.
+</span><span class=c1></span>            <span class=n>canCompareBitsOrUseFastGetHashCode</span> <span class=o>=</span> <span class=n>FALSE</span><span class=p>;</span>
+            <span class=k>break</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=c1>// We&#39;ve gone through all instance fields. It&#39;s time to cache the result.
+</span><span class=c1></span>    <span class=c1>// Note SetCanCompareBitsOrUseFastGetHashCode(BOOL) ensures the checked flag
+</span><span class=c1></span>    <span class=c1>// and canCompare flag being set atomically to avoid race.
+</span><span class=c1></span>    <span class=n>mt</span><span class=o>-&gt;</span><span class=n>SetCanCompareBitsOrUseFastGetHashCode</span><span class=p>(</span><span class=n>canCompareBitsOrUseFastGetHashCode</span><span class=p>);</span>
+
+    <span class=k>return</span> <span class=n>canCompareBitsOrUseFastGetHashCode</span><span class=p>;</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>This method returns true if the specified type can be processed using fast algorithm. Looking at its implementation, we can clearly separate a set of rules:</p><ul><li>Use <strong>fast</strong> algorithm when:<ul><li>The type is already checked and <a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L313>enum_flag_CanCompareBitsOrUseFastGetHashCode</a> flag is set to true.</li><li>All internal fields are value types.</li><li>there are no any holes between internal fields.</li><li><a href="https://docs.microsoft.com/en-us/dotnet/api/system.valuetype.equals?view=netcore-3.1">Equals</a> and <a href="https://docs.microsoft.com/en-us/dotnet/api/system.valuetype.gethashcode?view=netcore-3.1">GetHashCode</a> aren&rsquo;t overridden.</li></ul></li><li>Use <strong>regular</strong> algorithm when:<ul><li>The type is already checked and <a href=https://github.com/dotnet/runtime/blob/611555e00a80b4b60030fe4483b81494664975b8/src/coreclr/src/vm/methodtable.h#L313>enum_flag_CanCompareBitsOrUseFastGetHashCode</a> flag is set to false.</li><li>Some of the internal fields are reference types.</li><li>Internal fields has been aligned to improve performance.</li><li><a href="https://docs.microsoft.com/en-us/dotnet/api/system.valuetype.equals?view=netcore-3.1">Equals</a> or <a href="https://docs.microsoft.com/en-us/dotnet/api/system.valuetype.gethashcode?view=netcore-3.1">GetHashCode</a> has been overridden.</li></ul></li></ul><p>First, let&rsquo;s see at the <strong>fast</strong> algorithm because it&rsquo;s easier to understand. We can found it in <a href=https://github.com/dotnet/runtime/blob/ab49e0f9dcd56958148827c6b47428b56187b5f8/src/coreclr/src/vm/comutilnative.cpp#L1858>FastGetValueTypeHashCodeHelper</a> method:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=k>static</span> <span class=n>INT32</span> <span class=nf>FastGetValueTypeHashCodeHelper</span><span class=p>(</span><span class=n>MethodTable</span> <span class=o>*</span><span class=n>mt</span><span class=p>,</span> <span class=kt>void</span> <span class=o>*</span><span class=n>pObjRef</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>CONTRACTL</span>
+    <span class=p>{</span>
+        <span class=n>NOTHROW</span><span class=p>;</span>
+        <span class=n>GC_NOTRIGGER</span><span class=p>;</span>
+        <span class=n>MODE_COOPERATIVE</span><span class=p>;</span>
+    <span class=p>}</span> <span class=n>CONTRACTL_END</span><span class=p>;</span>
+
+    <span class=n>INT32</span> <span class=n>hashCode</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+    <span class=n>INT32</span> <span class=o>*</span><span class=n>pObj</span> <span class=o>=</span> <span class=p>(</span><span class=n>INT32</span><span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span><span class=p>;</span>
+
+    <span class=c1>// this is a struct with no refs and no &#34;strange&#34; offsets, just go through the obj and xor the bits
+</span><span class=c1></span>    <span class=n>INT32</span> <span class=n>size</span> <span class=o>=</span> <span class=n>mt</span><span class=o>-&gt;</span><span class=n>GetNumInstanceFieldBytes</span><span class=p>();</span>
+    <span class=k>for</span> <span class=p>(</span><span class=n>INT32</span> <span class=n>i</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>i</span> <span class=o>&lt;</span> <span class=p>(</span><span class=n>INT32</span><span class=p>)(</span><span class=n>size</span> <span class=o>/</span> <span class=k>sizeof</span><span class=p>(</span><span class=n>INT32</span><span class=p>));</span> <span class=n>i</span><span class=o>++</span><span class=p>)</span>
+        <span class=n>hashCode</span> <span class=o>^=</span> <span class=o>*</span><span class=n>pObj</span><span class=o>++</span><span class=p>;</span>
+
+    <span class=k>return</span> <span class=n>hashCode</span><span class=p>;</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>The algorithm is very simple and in fact, it&rsquo;s just a loop that takes all bytes which represents the type&rsquo;s instance and does XOR operation. It&rsquo;s worth noting that we don&rsquo;t distinguish every internal field separately - it would be a waste of time.</p><p>Not let&rsquo;s see at the second algorithm, <strong>regular</strong>, implemented in <a href=https://github.com/dotnet/runtime/blob/ab49e0f9dcd56958148827c6b47428b56187b5f8/src/coreclr/src/vm/comutilnative.cpp#L1878>RegularGetValueTypeHashCode</a> method:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt>  1
+</span><span class=lnt>  2
+</span><span class=lnt>  3
+</span><span class=lnt>  4
+</span><span class=lnt>  5
+</span><span class=lnt>  6
+</span><span class=lnt>  7
+</span><span class=lnt>  8
+</span><span class=lnt>  9
+</span><span class=lnt> 10
+</span><span class=lnt> 11
+</span><span class=lnt> 12
+</span><span class=lnt> 13
+</span><span class=lnt> 14
+</span><span class=lnt> 15
+</span><span class=lnt> 16
+</span><span class=lnt> 17
+</span><span class=lnt> 18
+</span><span class=lnt> 19
+</span><span class=lnt> 20
+</span><span class=lnt> 21
+</span><span class=lnt> 22
+</span><span class=lnt> 23
+</span><span class=lnt> 24
+</span><span class=lnt> 25
+</span><span class=lnt> 26
+</span><span class=lnt> 27
+</span><span class=lnt> 28
+</span><span class=lnt> 29
+</span><span class=lnt> 30
+</span><span class=lnt> 31
+</span><span class=lnt> 32
+</span><span class=lnt> 33
+</span><span class=lnt> 34
+</span><span class=lnt> 35
+</span><span class=lnt> 36
+</span><span class=lnt> 37
+</span><span class=lnt> 38
+</span><span class=lnt> 39
+</span><span class=lnt> 40
+</span><span class=lnt> 41
+</span><span class=lnt> 42
+</span><span class=lnt> 43
+</span><span class=lnt> 44
+</span><span class=lnt> 45
+</span><span class=lnt> 46
+</span><span class=lnt> 47
+</span><span class=lnt> 48
+</span><span class=lnt> 49
+</span><span class=lnt> 50
+</span><span class=lnt> 51
+</span><span class=lnt> 52
+</span><span class=lnt> 53
+</span><span class=lnt> 54
+</span><span class=lnt> 55
+</span><span class=lnt> 56
+</span><span class=lnt> 57
+</span><span class=lnt> 58
+</span><span class=lnt> 59
+</span><span class=lnt> 60
+</span><span class=lnt> 61
+</span><span class=lnt> 62
+</span><span class=lnt> 63
+</span><span class=lnt> 64
+</span><span class=lnt> 65
+</span><span class=lnt> 66
+</span><span class=lnt> 67
+</span><span class=lnt> 68
+</span><span class=lnt> 69
+</span><span class=lnt> 70
+</span><span class=lnt> 71
+</span><span class=lnt> 72
+</span><span class=lnt> 73
+</span><span class=lnt> 74
+</span><span class=lnt> 75
+</span><span class=lnt> 76
+</span><span class=lnt> 77
+</span><span class=lnt> 78
+</span><span class=lnt> 79
+</span><span class=lnt> 80
+</span><span class=lnt> 81
+</span><span class=lnt> 82
+</span><span class=lnt> 83
+</span><span class=lnt> 84
+</span><span class=lnt> 85
+</span><span class=lnt> 86
+</span><span class=lnt> 87
+</span><span class=lnt> 88
+</span><span class=lnt> 89
+</span><span class=lnt> 90
+</span><span class=lnt> 91
+</span><span class=lnt> 92
+</span><span class=lnt> 93
+</span><span class=lnt> 94
+</span><span class=lnt> 95
+</span><span class=lnt> 96
+</span><span class=lnt> 97
+</span><span class=lnt> 98
+</span><span class=lnt> 99
+</span><span class=lnt>100
+</span><span class=lnt>101
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-cpp data-lang=cpp><span class=k>static</span> <span class=n>INT32</span> <span class=nf>RegularGetValueTypeHashCode</span><span class=p>(</span><span class=n>MethodTable</span> <span class=o>*</span><span class=n>mt</span><span class=p>,</span> <span class=kt>void</span> <span class=o>*</span><span class=n>pObjRef</span><span class=p>)</span>
+<span class=p>{</span>
+    <span class=n>CONTRACTL</span>
+    <span class=p>{</span>
+        <span class=n>THROWS</span><span class=p>;</span>
+        <span class=n>GC_TRIGGERS</span><span class=p>;</span>
+        <span class=n>MODE_COOPERATIVE</span><span class=p>;</span>
+    <span class=p>}</span> <span class=n>CONTRACTL_END</span><span class=p>;</span>
+
+    <span class=n>INT32</span> <span class=n>hashCode</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span>
+
+    <span class=n>GCPROTECT_BEGININTERIOR</span><span class=p>(</span><span class=n>pObjRef</span><span class=p>);</span>
+
+    <span class=n>BOOL</span> <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>FALSE</span><span class=p>;</span>
+    <span class=k>if</span> <span class=p>(</span><span class=n>mt</span><span class=o>-&gt;</span><span class=n>HasCheckedCanCompareBitsOrUseFastGetHashCode</span><span class=p>())</span>
+    <span class=p>{</span>
+        <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>mt</span><span class=o>-&gt;</span><span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>();</span>
+    <span class=p>}</span>
+    <span class=k>else</span>
+    <span class=p>{</span>
+        <span class=n>canUseFastGetHashCodeHelper</span> <span class=o>=</span> <span class=n>CanCompareBitsOrUseFastGetHashCode</span><span class=p>(</span><span class=n>mt</span><span class=p>);</span>
+    <span class=p>}</span>
+
+    <span class=c1>// While we shouln&#39;t get here directly from ValueTypeHelper::GetHashCode, if we recurse we need to
+</span><span class=c1></span>    <span class=c1>// be able to handle getting the hashcode for an embedded structure whose hashcode is computed by the fast path.
+</span><span class=c1></span>    <span class=k>if</span> <span class=p>(</span><span class=n>canUseFastGetHashCodeHelper</span><span class=p>)</span>
+    <span class=p>{</span>
+        <span class=n>hashCode</span> <span class=o>=</span> <span class=n>FastGetValueTypeHashCodeHelper</span><span class=p>(</span><span class=n>mt</span><span class=p>,</span> <span class=n>pObjRef</span><span class=p>);</span>
+    <span class=p>}</span>
+    <span class=k>else</span>
+    <span class=p>{</span>
+        <span class=c1>// it&#39;s looking ugly so we&#39;ll use the old behavior in managed code. Grab the first non-null
+</span><span class=c1></span>        <span class=c1>// field and return its hash code or &#39;it&#39; as hash code
+</span><span class=c1></span>        <span class=c1>// &lt;TODO&gt; Note that the old behavior has already been broken for value types
+</span><span class=c1></span>        <span class=c1>//              that is qualified for CanUseFastGetHashCodeHelper. So maybe we should
+</span><span class=c1></span>        <span class=c1>//              change the implementation here to use all fields instead of just the 1st one.
+</span><span class=c1></span>        <span class=c1>// &lt;/TODO&gt;
+</span><span class=c1></span>        <span class=c1>//
+</span><span class=c1></span>        <span class=c1>// &lt;TODO&gt; check this approximation - we may be losing exact type information &lt;/TODO&gt;
+</span><span class=c1></span>        <span class=n>ApproxFieldDescIterator</span> <span class=n>fdIterator</span><span class=p>(</span><span class=n>mt</span><span class=p>,</span> <span class=n>ApproxFieldDescIterator</span><span class=o>::</span><span class=n>INSTANCE_FIELDS</span><span class=p>);</span>
+
+        <span class=n>FieldDesc</span> <span class=o>*</span><span class=n>field</span><span class=p>;</span>
+        <span class=k>while</span> <span class=p>((</span><span class=n>field</span> <span class=o>=</span> <span class=n>fdIterator</span><span class=p>.</span><span class=n>Next</span><span class=p>())</span> <span class=o>!=</span> <span class=nb>NULL</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>_ASSERTE</span><span class=p>(</span><span class=o>!</span><span class=n>field</span><span class=o>-&gt;</span><span class=n>IsRVA</span><span class=p>());</span>
+            <span class=k>if</span> <span class=p>(</span><span class=n>field</span><span class=o>-&gt;</span><span class=n>IsObjRef</span><span class=p>())</span>
+            <span class=p>{</span>
+                <span class=c1>// if we get an object reference we get the hash code out of that
+</span><span class=c1></span>                <span class=k>if</span> <span class=p>(</span><span class=o>*</span><span class=p>(</span><span class=n>Object</span><span class=o>**</span><span class=p>)((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>())</span> <span class=o>!=</span> <span class=nb>NULL</span><span class=p>)</span>
+                <span class=p>{</span>
+                    <span class=n>PREPARE_SIMPLE_VIRTUAL_CALLSITE</span><span class=p>(</span><span class=n>METHOD__OBJECT__GET_HASH_CODE</span><span class=p>,</span> <span class=p>(</span><span class=o>*</span><span class=p>(</span><span class=n>Object</span><span class=o>**</span><span class=p>)((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>())));</span>
+                    <span class=n>DECLARE_ARGHOLDER_ARRAY</span><span class=p>(</span><span class=n>args</span><span class=p>,</span> <span class=mi>1</span><span class=p>);</span>
+                    <span class=n>args</span><span class=p>[</span><span class=n>ARGNUM_0</span><span class=p>]</span> <span class=o>=</span> <span class=n>PTR_TO_ARGHOLDER</span><span class=p>(</span><span class=o>*</span><span class=p>(</span><span class=n>Object</span><span class=o>**</span><span class=p>)((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>()));</span>
+                    <span class=n>CALL_MANAGED_METHOD</span><span class=p>(</span><span class=n>hashCode</span><span class=p>,</span> <span class=n>INT32</span><span class=p>,</span> <span class=n>args</span><span class=p>);</span>
+                <span class=p>}</span>
+                <span class=k>else</span>
+                <span class=p>{</span>
+                    <span class=c1>// null object reference, try next
+</span><span class=c1></span>                    <span class=k>continue</span><span class=p>;</span>
+                <span class=p>}</span>
+            <span class=p>}</span>
+            <span class=k>else</span>
+            <span class=p>{</span>
+                <span class=n>CorElementType</span> <span class=n>fieldType</span> <span class=o>=</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetFieldType</span><span class=p>();</span>
+                <span class=k>if</span> <span class=p>(</span><span class=n>fieldType</span> <span class=o>==</span> <span class=n>ELEMENT_TYPE_R8</span><span class=p>)</span>
+                <span class=p>{</span>
+                    <span class=n>PREPARE_NONVIRTUAL_CALLSITE</span><span class=p>(</span><span class=n>METHOD__DOUBLE__GET_HASH_CODE</span><span class=p>);</span>
+                    <span class=n>DECLARE_ARGHOLDER_ARRAY</span><span class=p>(</span><span class=n>args</span><span class=p>,</span> <span class=mi>1</span><span class=p>);</span>
+                    <span class=n>args</span><span class=p>[</span><span class=n>ARGNUM_0</span><span class=p>]</span> <span class=o>=</span> <span class=n>PTR_TO_ARGHOLDER</span><span class=p>(((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>()));</span>
+                    <span class=n>CALL_MANAGED_METHOD</span><span class=p>(</span><span class=n>hashCode</span><span class=p>,</span> <span class=n>INT32</span><span class=p>,</span> <span class=n>args</span><span class=p>);</span>
+                <span class=p>}</span>
+                <span class=k>else</span> <span class=k>if</span> <span class=p>(</span><span class=n>fieldType</span> <span class=o>==</span> <span class=n>ELEMENT_TYPE_R4</span><span class=p>)</span>
+                <span class=p>{</span>
+                    <span class=n>PREPARE_NONVIRTUAL_CALLSITE</span><span class=p>(</span><span class=n>METHOD__SINGLE__GET_HASH_CODE</span><span class=p>);</span>
+                    <span class=n>DECLARE_ARGHOLDER_ARRAY</span><span class=p>(</span><span class=n>args</span><span class=p>,</span> <span class=mi>1</span><span class=p>);</span>
+                    <span class=n>args</span><span class=p>[</span><span class=n>ARGNUM_0</span><span class=p>]</span> <span class=o>=</span> <span class=n>PTR_TO_ARGHOLDER</span><span class=p>(((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>()));</span>
+                    <span class=n>CALL_MANAGED_METHOD</span><span class=p>(</span><span class=n>hashCode</span><span class=p>,</span> <span class=n>INT32</span><span class=p>,</span> <span class=n>args</span><span class=p>);</span>
+                <span class=p>}</span>
+                <span class=k>else</span> <span class=k>if</span> <span class=p>(</span><span class=n>fieldType</span> <span class=o>!=</span> <span class=n>ELEMENT_TYPE_VALUETYPE</span><span class=p>)</span>
+                <span class=p>{</span>
+                    <span class=n>UINT</span> <span class=n>fieldSize</span> <span class=o>=</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>LoadSize</span><span class=p>();</span>
+                    <span class=n>INT32</span> <span class=o>*</span><span class=n>pValue</span> <span class=o>=</span> <span class=p>(</span><span class=n>INT32</span><span class=o>*</span><span class=p>)((</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>());</span>
+                    <span class=k>for</span> <span class=p>(</span><span class=n>INT32</span> <span class=n>j</span> <span class=o>=</span> <span class=mi>0</span><span class=p>;</span> <span class=n>j</span> <span class=o>&lt;</span> <span class=p>(</span><span class=n>INT32</span><span class=p>)(</span><span class=n>fieldSize</span> <span class=o>/</span> <span class=k>sizeof</span><span class=p>(</span><span class=n>INT32</span><span class=p>));</span> <span class=n>j</span><span class=o>++</span><span class=p>)</span>
+                        <span class=n>hashCode</span> <span class=o>^=</span> <span class=o>*</span><span class=n>pValue</span><span class=o>++</span><span class=p>;</span>
+                <span class=p>}</span>
+                <span class=k>else</span>
+                <span class=p>{</span>
+                    <span class=c1>// got another value type. Get the type
+</span><span class=c1></span>                    <span class=n>TypeHandle</span> <span class=n>fieldTH</span> <span class=o>=</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetFieldTypeHandleThrowing</span><span class=p>();</span>
+                    <span class=n>_ASSERTE</span><span class=p>(</span><span class=o>!</span><span class=n>fieldTH</span><span class=p>.</span><span class=n>IsNull</span><span class=p>());</span>
+                    <span class=n>hashCode</span> <span class=o>=</span> <span class=n>RegularGetValueTypeHashCode</span><span class=p>(</span><span class=n>fieldTH</span><span class=p>.</span><span class=n>GetMethodTable</span><span class=p>(),</span> <span class=p>(</span><span class=n>BYTE</span> <span class=o>*</span><span class=p>)</span><span class=n>pObjRef</span> <span class=o>+</span> <span class=n>field</span><span class=o>-&gt;</span><span class=n>GetOffsetUnsafe</span><span class=p>());</span>
+                <span class=p>}</span>
+            <span class=p>}</span>
+            <span class=k>break</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=n>GCPROTECT_END</span><span class=p>();</span>
+
+    <span class=k>return</span> <span class=n>hashCode</span><span class=p>;</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>Here we can see one interesting thing. If CLR decides to use the regular version of hash code computing, then it will use only the first internal field. It means, if you have a structure with fields: Age (int), Height (int), Weight (int), and Ref (object), then only a change of Age&rsquo;s value will affect a value returned from the non-overridden <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> method. Let&rsquo;s see an example:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>using</span> <span class=nn>System</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>System.Diagnostics</span><span class=p>;</span>
+
+<span class=k>namespace</span> <span class=nn>GetHashCodeCore</span>
+<span class=p>{</span>
+    <span class=k>public</span> <span class=k>struct</span> <span class=nc>PersonWithRef</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Age</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Height</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Weight</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>object</span> <span class=n>Ref</span><span class=p>;</span>
+
+        <span class=k>public</span> <span class=n>PersonWithRef</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>Age</span> <span class=p>=</span> <span class=n>age</span><span class=p>;</span>
+            <span class=n>Height</span> <span class=p>=</span> <span class=n>height</span><span class=p>;</span>
+            <span class=n>Weight</span> <span class=p>=</span> <span class=n>weight</span><span class=p>;</span>
+            <span class=n>Ref</span> <span class=p>=</span> <span class=k>new</span> <span class=kt>object</span><span class=p>();</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=k>class</span> <span class=nc>Program</span>
+    <span class=p>{</span>
+        <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=kt>var</span> <span class=n>pRef1</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithRef</span><span class=p>(</span><span class=m>20</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>60</span><span class=p>);</span>
+            <span class=kt>var</span> <span class=n>pRef2</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithRef</span><span class=p>(</span><span class=m>20</span><span class=p>,</span> <span class=m>170</span><span class=p>,</span> <span class=m>70</span><span class=p>);</span>
+            <span class=kt>var</span> <span class=n>pRef3</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithRef</span><span class=p>(</span><span class=m>30</span><span class=p>,</span> <span class=m>170</span><span class=p>,</span> <span class=m>70</span><span class=p>);</span>
+
+            <span class=n>Console</span><span class=p>.</span><span class=n>WriteLine</span><span class=p>(</span><span class=s>$&#34;PersonWithRef 1 hash code: {pRef1.GetHashCode()}&#34;</span><span class=p>);</span>
+            <span class=n>Console</span><span class=p>.</span><span class=n>WriteLine</span><span class=p>(</span><span class=s>$&#34;PersonWithRef 2 hash code: {pRef2.GetHashCode()}&#34;</span><span class=p>);</span>
+            <span class=n>Console</span><span class=p>.</span><span class=n>WriteLine</span><span class=p>(</span><span class=s>$&#34;PersonWithRef 3 hash code: {pRef3.GetHashCode()}&#34;</span><span class=p>);</span>
+
+            <span class=n>Console</span><span class=p>.</span><span class=n>Read</span><span class=p>();</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><pre><code>PersonWithRef 1 hash code: -1101417524
+PersonWithRef 2 hash code: -1101417524
+PersonWithRef 3 hash code: -1101417530
+</code></pre><p>Two first persons have the same age and different height and width. What&rsquo;s more important, they have also the same hash code, which is consistent with the observations made in CLR source code. The third person has the same height and weight as the second person, but different age - because only the age is used to perform calculations, the hash code is different.</p><p>So let&rsquo;s summarize what we know at this moment in relation to C#. We will get hash code based on all instance bytes if the type is an integral or a struct (where all internal fields are also value types and there are no holes between them). If some of these requirements aren&rsquo;t fulfilled, then CLR will calculate hash code using the regular version of the algorithm (so only the first field will be used).</p><p>I wrote &ldquo;integral&rdquo; and not &ldquo;simple type&rdquo; not without reason - <code>bool</code>, <code>float</code> and <code>double</code> have their own overrided versions of <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a>, fortunelty written in pure C#. Let&rsquo;s check them:</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=c1>// ---------
+</span><span class=c1>// bool
+</span><span class=c1>// ---------
+</span><span class=c1></span><span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
+<span class=p>{</span>
+    <span class=k>return</span> <span class=p>(</span><span class=n>m_value</span><span class=p>)</span> <span class=p>?</span> <span class=n>True</span> <span class=p>:</span> <span class=n>False</span><span class=p>;</span>
+<span class=p>}</span>
+
+<span class=c1>// ---------
+</span><span class=c1>// float
+</span><span class=c1>// ---------
+</span><span class=c1></span><span class=na>[MethodImpl(MethodImplOptions.AggressiveInlining)]</span>
+<span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
+<span class=p>{</span>
+    <span class=kt>var</span> <span class=n>bits</span> <span class=p>=</span> <span class=n>Unsafe</span><span class=p>.</span><span class=n>As</span><span class=p>&lt;</span><span class=kt>float</span><span class=p>,</span> <span class=kt>int</span><span class=p>&gt;(</span><span class=k>ref</span> <span class=n>Unsafe</span><span class=p>.</span><span class=n>AsRef</span><span class=p>(</span><span class=k>in</span> <span class=n>m_value</span><span class=p>));</span>
+
+    <span class=c1>// Optimized check for IsNan() || IsZero()
+</span><span class=c1></span>    <span class=k>if</span> <span class=p>(((</span><span class=n>bits</span> <span class=p>-</span> <span class=m>1</span><span class=p>)</span> <span class=p>&amp;</span> <span class=m>0</span><span class=n>x7FFFFFFF</span><span class=p>)</span> <span class=p>&gt;=</span> <span class=m>0</span><span class=n>x7F800000</span><span class=p>)</span>
+    <span class=p>{</span>
+        <span class=c1>// Ensure that all NaNs and both zeros have the same hash code
+</span><span class=c1></span>        <span class=n>bits</span> <span class=p>&amp;=</span> <span class=m>0</span><span class=n>x7F800000</span><span class=p>;</span>
+    <span class=p>}</span>
+
+    <span class=k>return</span> <span class=n>bits</span><span class=p>;</span>
+<span class=p>}</span>
+
+<span class=c1>// ---------
+</span><span class=c1>// double
+</span><span class=c1>// ---------
+</span><span class=c1></span><span class=na>[MethodImpl(MethodImplOptions.AggressiveInlining)]</span>
+<span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
+<span class=p>{</span>
+    <span class=kt>var</span> <span class=n>bits</span> <span class=p>=</span> <span class=n>Unsafe</span><span class=p>.</span><span class=n>As</span><span class=p>&lt;</span><span class=kt>double</span><span class=p>,</span> <span class=kt>long</span><span class=p>&gt;(</span><span class=k>ref</span> <span class=n>Unsafe</span><span class=p>.</span><span class=n>AsRef</span><span class=p>(</span><span class=k>in</span> <span class=n>m_value</span><span class=p>));</span>
+
+    <span class=c1>// Optimized check for IsNan() || IsZero()
+</span><span class=c1></span>    <span class=k>if</span> <span class=p>(((</span><span class=n>bits</span> <span class=p>-</span> <span class=m>1</span><span class=p>)</span> <span class=p>&amp;</span> <span class=m>0</span><span class=n>x7FFFFFFFFFFFFFFF</span><span class=p>)</span> <span class=p>&gt;=</span> <span class=m>0</span><span class=n>x7FF0000000000000</span><span class=p>)</span>
+    <span class=p>{</span>
+        <span class=c1>// Ensure that all NaNs and both zeros have the same hash code
+</span><span class=c1></span>        <span class=n>bits</span> <span class=p>&amp;=</span> <span class=m>0</span><span class=n>x7FF0000000000000</span><span class=p>;</span>
+    <span class=p>}</span>
+
+    <span class=k>return</span> <span class=k>unchecked</span><span class=p>((</span><span class=kt>int</span><span class=p>)</span><span class=n>bits</span><span class=p>)</span> <span class=p>^</span> <span class=p>((</span><span class=kt>int</span><span class=p>)(</span><span class=n>bits</span> <span class=p>&gt;&gt;</span> <span class=m>32</span><span class=p>));</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>As we can see, <code>bool</code> type just returns 1 if it&rsquo;s set to true or 0 if it&rsquo;s set to false. On the other side, <code>float</code> and <code>double</code> are a bit more complex because of IEEE 754 nature - the number can be positively zero or negatively zero. It would have no sense to have different hash codes for them because from the human perspective both are equal. Additionally, <code>double</code> does XOR operation on both 32-bit halves, which is understandable because the hash code is 32-bit.</p><h2 id=benchmark>Benchmark</h2><p>As we can see, there is a lot of checks and other operations to calculate hash code for a value type, even if CLR uses a simple fast version of the algorithm. That&rsquo;s why we should always override <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> in value types and provide our version which will be much faster. Let&rsquo;s prove it by modifying the previous code by adding a simple benchmark (using <a href=https://github.com/dotnet/BenchmarkDotNet>BenchmarkDotNet</a> library):</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span><span class=lnt>21
+</span><span class=lnt>22
+</span><span class=lnt>23
+</span><span class=lnt>24
+</span><span class=lnt>25
+</span><span class=lnt>26
+</span><span class=lnt>27
+</span><span class=lnt>28
+</span><span class=lnt>29
+</span><span class=lnt>30
+</span><span class=lnt>31
+</span><span class=lnt>32
+</span><span class=lnt>33
+</span><span class=lnt>34
+</span><span class=lnt>35
+</span><span class=lnt>36
+</span><span class=lnt>37
+</span><span class=lnt>38
+</span><span class=lnt>39
+</span><span class=lnt>40
+</span><span class=lnt>41
+</span><span class=lnt>42
+</span><span class=lnt>43
+</span><span class=lnt>44
+</span><span class=lnt>45
+</span><span class=lnt>46
+</span><span class=lnt>47
+</span><span class=lnt>48
+</span><span class=lnt>49
+</span><span class=lnt>50
+</span><span class=lnt>51
+</span><span class=lnt>52
+</span><span class=lnt>53
+</span><span class=lnt>54
+</span><span class=lnt>55
+</span><span class=lnt>56
+</span><span class=lnt>57
+</span><span class=lnt>58
+</span><span class=lnt>59
+</span><span class=lnt>60
+</span><span class=lnt>61
+</span><span class=lnt>62
+</span><span class=lnt>63
+</span><span class=lnt>64
+</span><span class=lnt>65
+</span><span class=lnt>66
+</span><span class=lnt>67
+</span><span class=lnt>68
+</span><span class=lnt>69
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-csharp data-lang=csharp><span class=k>using</span> <span class=nn>BenchmarkDotNet.Attributes</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Jobs</span><span class=p>;</span>
+<span class=k>using</span> <span class=nn>BenchmarkDotNet.Running</span><span class=p>;</span>
+
+<span class=k>namespace</span> <span class=nn>GetHashCodeCore</span>
+<span class=p>{</span>
+    <span class=k>public</span> <span class=k>struct</span> <span class=nc>PersonWithoutGetHashCode</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Age</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Height</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Weight</span><span class=p>;</span>
+
+        <span class=k>public</span> <span class=n>PersonWithoutGetHashCode</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>Age</span> <span class=p>=</span> <span class=n>age</span><span class=p>;</span>
+            <span class=n>Height</span> <span class=p>=</span> <span class=n>height</span><span class=p>;</span>
+            <span class=n>Weight</span> <span class=p>=</span> <span class=n>weight</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=k>public</span> <span class=k>struct</span> <span class=nc>PersonWithGetHashCode</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Age</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Height</span><span class=p>;</span>
+        <span class=k>public</span> <span class=k>readonly</span> <span class=kt>int</span> <span class=n>Weight</span><span class=p>;</span>
+
+        <span class=k>public</span> <span class=n>PersonWithGetHashCode</span><span class=p>(</span><span class=kt>int</span> <span class=n>age</span><span class=p>,</span> <span class=kt>int</span> <span class=n>height</span><span class=p>,</span> <span class=kt>int</span> <span class=n>weight</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>Age</span> <span class=p>=</span> <span class=n>age</span><span class=p>;</span>
+            <span class=n>Height</span> <span class=p>=</span> <span class=n>height</span><span class=p>;</span>
+            <span class=n>Weight</span> <span class=p>=</span> <span class=n>weight</span><span class=p>;</span>
+        <span class=p>}</span>
+
+        <span class=k>public</span> <span class=k>override</span> <span class=kt>int</span> <span class=n>GetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=k>return</span> <span class=n>Age</span> <span class=p>^</span> <span class=n>Height</span> <span class=p>^</span> <span class=n>Weight</span><span class=p>;</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+<span class=na>
+</span><span class=na>    [DisassemblyDiagnoser]</span>
+<span class=na>    [SimpleJob(RuntimeMoniker.NetCoreApp31)]</span>
+    <span class=k>public</span> <span class=k>class</span> <span class=nc>GetHashCodeTest</span>
+    <span class=p>{</span>
+        <span class=k>private</span> <span class=n>PersonWithoutGetHashCode</span> <span class=n>_personWithoutGetHashCode</span><span class=p>;</span>
+        <span class=k>private</span> <span class=n>PersonWithGetHashCode</span> <span class=n>_personWithGetHashCode</span><span class=p>;</span>
+<span class=na>
+</span><span class=na>        [Benchmark]</span>
+        <span class=k>public</span> <span class=k>void</span> <span class=n>TestPersonWithoutGetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=kt>var</span> <span class=n>result</span> <span class=p>=</span> <span class=n>_personWithoutGetHashCode</span><span class=p>.</span><span class=n>GetHashCode</span><span class=p>();</span>
+            <span class=n>_personWithoutGetHashCode</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithoutGetHashCode</span><span class=p>(</span><span class=n>result</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>50</span><span class=p>);</span>
+        <span class=p>}</span>
+<span class=na>
+</span><span class=na>        [Benchmark]</span>
+        <span class=k>public</span> <span class=k>void</span> <span class=n>TestPersonWithGetHashCode</span><span class=p>()</span>
+        <span class=p>{</span>
+            <span class=kt>var</span> <span class=n>result</span> <span class=p>=</span> <span class=n>_personWithGetHashCode</span><span class=p>.</span><span class=n>GetHashCode</span><span class=p>();</span>
+            <span class=n>_personWithGetHashCode</span> <span class=p>=</span> <span class=k>new</span> <span class=n>PersonWithGetHashCode</span><span class=p>(</span><span class=n>result</span><span class=p>,</span> <span class=m>160</span><span class=p>,</span> <span class=m>50</span><span class=p>);</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+
+    <span class=k>class</span> <span class=nc>Program</span>
+    <span class=p>{</span>
+        <span class=k>public</span> <span class=k>static</span> <span class=k>void</span> <span class=n>Main</span><span class=p>(</span><span class=kt>string</span><span class=p>[]</span> <span class=n>args</span><span class=p>)</span>
+        <span class=p>{</span>
+            <span class=n>BenchmarkRunner</span><span class=p>.</span><span class=n>Run</span><span class=p>&lt;</span><span class=n>GetHashCodeTest</span><span class=p>&gt;();</span>
+        <span class=p>}</span>
+    <span class=p>}</span>
+<span class=p>}</span>
+</code></pre></td></tr></table></div></div><p>We have two similar structures - one with default <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> implementation and one with our own. Every benchmark does two things: first, it calculates hash code for the appropriate struct instance, and second, it creates a new one with the <code>Age</code> value stored in the <code>result</code> variable. This prevents the compiler from precalculating elements or doing other optimizations.</p><pre><code>BenchmarkDotNet=v0.12.1, OS=Windows 10.0.18363.959 (1909/November2018Update/19H2)
+Intel Core i5-8300H CPU 2.30GHz (Coffee Lake), 1 CPU, 8 logical and 4 physical cores
+.NET Core SDK=5.0.100-preview.5.20279.10
+  [Host]        : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+  .NET Core 3.1 : .NET Core 3.1.6 (CoreCLR 4.700.20.26901, CoreFX 4.700.20.31603), X64 RyuJIT
+
+Job=.NET Core 3.1  Runtime=.NET Core 3.1
+</code></pre><table><thead><tr><th>Method</th><th align=right>Mean</th><th align=right>Error</th><th align=right>StdDev</th><th align=right>Code Size</th></tr></thead><tbody><tr><td>TestPersonWithoutGetHashCode</td><td align=right>29.6406 ns</td><td align=right>0.2940 ns</td><td align=right>0.2750 ns</td><td align=right>73 B</td></tr><tr><td>TestPersonWithGetHashCode</td><td align=right>0.1220 ns</td><td align=right>0.0065 ns</td><td align=right>0.0061 ns</td><td align=right>32 B</td></tr></tbody></table><p>The difference is very visible - default <a href="https://docs.microsoft.com/en-us/dotnet/api/system.object.gethashcode?view=netcore-3.1">GetHashCode</a> (using CLR implementation) is several dozen times slower than our custom one. This is because CLR doesn&rsquo;t need to check anymore if some of the internal fields in the structure are a reference or there are some holes between them. We just XOR all fields and return the result.</p><p>Just for curious, we can check what assembly code has been generated for both methods. The first one is for <code>TestPersonWithoutGetHashCode</code>, and we can see that there is a lot of operations - this is just a preparations to call a <code>call 00007FFCA6AE3B50</code>, which is the internal call.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span><span class=lnt>11
+</span><span class=lnt>12
+</span><span class=lnt>13
+</span><span class=lnt>14
+</span><span class=lnt>15
+</span><span class=lnt>16
+</span><span class=lnt>17
+</span><span class=lnt>18
+</span><span class=lnt>19
+</span><span class=lnt>20
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-asm data-lang=asm><span class=c>; GetHashCodeCore.GetHashCodeTest.TestPersonWithoutGetHashCode()
+</span><span class=c></span>    <span class=nf>push</span>      <span class=no>rsi</span>
+    <span class=nf>sub</span>       <span class=no>rsp</span><span class=p>,</span><span class=mi>20</span>
+    <span class=nf>mov</span>       <span class=no>rsi</span><span class=p>,</span><span class=no>rcx</span>
+    <span class=nf>mov</span>       <span class=no>rcx</span><span class=p>,</span><span class=no>offset</span> <span class=no>MT_GetHashCodeCore.PersonWithoutGetHashCode</span>
+    <span class=nf>call</span>      <span class=no>CORINFO_HELP_NEWSFAST</span>
+    <span class=nf>add</span>       <span class=no>rsi</span><span class=p>,</span><span class=mi>8</span>
+    <span class=nf>lea</span>       <span class=no>rcx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+    <span class=nf>mov</span>       <span class=no>rdx</span><span class=p>,[</span><span class=no>rsi</span><span class=p>]</span>
+    <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=p>],</span><span class=no>rdx</span>
+    <span class=nf>mov</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+    <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=no>edx</span>
+    <span class=nf>mov</span>       <span class=no>rcx</span><span class=p>,</span><span class=no>rax</span>
+    <span class=nf>call</span>      <span class=mi>00007</span><span class=no>FFCA6AE3B50</span>
+    <span class=nf>mov</span>       <span class=p>[</span><span class=no>rsi</span><span class=p>],</span><span class=no>eax</span>
+    <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>4</span><span class=p>],</span><span class=mi>0</span><span class=no>A0</span>
+    <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rsi</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=mi>32</span>
+    <span class=nf>add</span>       <span class=no>rsp</span><span class=p>,</span><span class=mi>20</span>
+    <span class=nf>pop</span>       <span class=no>rsi</span>
+    <span class=nf>ret</span></code></pre></td></tr></table></div></div><p>The second one, related to <code>TestPersonWithGetHashCode</code>, has been inlined by the compiler and simply retrieves values from the struct instance and then does a XOR operation.</p><div class=highlight><div class=chroma><table class=lntable><tr><td class=lntd><pre class=chroma><code><span class=lnt> 1
+</span><span class=lnt> 2
+</span><span class=lnt> 3
+</span><span class=lnt> 4
+</span><span class=lnt> 5
+</span><span class=lnt> 6
+</span><span class=lnt> 7
+</span><span class=lnt> 8
+</span><span class=lnt> 9
+</span><span class=lnt>10
+</span></code></pre></td><td class=lntd><pre class=chroma><code class=language-asm data-lang=asm><span class=c>; GetHashCodeCore.GetHashCodeTest.TestPersonWithGetHashCode()
+</span><span class=c></span>    <span class=nf>add</span>       <span class=no>rcx</span><span class=p>,</span><span class=mi>18</span>
+    <span class=nf>mov</span>       <span class=no>rax</span><span class=p>,</span><span class=no>rcx</span>
+    <span class=nf>mov</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=p>]</span>
+    <span class=nf>xor</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>4</span><span class=p>]</span>
+    <span class=nf>xor</span>       <span class=no>edx</span><span class=p>,[</span><span class=no>rax</span><span class=err>+</span><span class=mi>8</span><span class=p>]</span>
+    <span class=nf>mov</span>       <span class=p>[</span><span class=no>rcx</span><span class=p>],</span><span class=no>edx</span>
+    <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>4</span><span class=p>],</span><span class=mi>0</span><span class=no>A0</span>
+    <span class=nf>mov</span>       <span class=no>dword</span> <span class=no>ptr</span> <span class=p>[</span><span class=no>rcx</span><span class=err>+</span><span class=mi>8</span><span class=p>],</span><span class=mi>32</span>
+    <span class=nf>ret</span></code></pre></td></tr></table></div></div><h2 id=summary>Summary</h2><p>This is the last part of the short &ldquo;GetHashCode Inside CLR&rdquo; series. We saw how <code>GetHashCode</code> method is implemented for reference and value types inside Common Language Runtime and how exactly these values are calculated. I think knowledge about nuances like this can be really useful for developers and help them to better understand the language.</p></div><footer class=post__footer><div class="post__tags tags clearfix"><svg class="tags__badge icon icon-tag" width="16" height="16" viewBox="0 0 32 32"><path d="M32 19c0 1-1 2-1 2L21 31s-1 1-2 1-2-1-2-1L2 16c-1-1-1.4-2-1.4-2S0 12.5.0 11V3C0 1.5.8.8.8.8S1.5.0 3 0h8c1.5.0 3 .6 3 .6S15 1 16 2l15 15s1 1 1 2zM7 10a3 3 0 100-6 3 3 0 000 6z"/></svg><ul class=tags__list><li class=tags__item><a class="tags__link btn" href=/tags/.net/ rel=tag>.NET</a></li><li class=tags__item><a class="tags__link btn" href=/tags/.net-core/ rel=tag>.NET Core</a></li><li class=tags__item><a class="tags__link btn" href=/tags/clr/ rel=tag>CLR</a></li><li class=tags__item><a class="tags__link btn" href=/tags/gethashcode/ rel=tag>GetHashCode</a></li></ul></div></footer></article></main><div class="authorbox clearfix"><figure class=authorbox__avatar><img alt="Tearth avatar" src=https://github.com/Tearth.png class=avatar height=90 width=90></figure><div class=authorbox__header><span class=authorbox__name>About Tearth</span></div><div class=authorbox__description>C# programmer. After hours I enjoy writing chess engines, reading about history, space exploration and playing simulators or strategy games. I miss space shuttles.</div></div><nav class="pager flex"><div class="pager__item pager__item--prev"><a class=pager__link href=/posts/gethashcode-inside-clr-reference-types/ rel=prev><span class=pager__subtitle>«&#8201;Previous</span><p class=pager__title>GetHashCode inside CLR: Reference types</p></a></div><div class="pager__item pager__item--next"><a class=pager__link href=/posts/magic-behind-closures/ rel=next><span class=pager__subtitle>Next&#8201;»</span><p class=pager__title>Magic behind closures</p></a></div></nav><div id=comments><script>var id=4;var user_name="tearth";var repo_name="tearth.github.io";if(id)
+{let url="https://github.com/"+user_name+"/"+repo_name+"/issues/"+id;let api_url="https://api.github.com/repos/"+user_name+"/"+repo_name+"/issues/"+id+"/comments";let link="<a href='"+url+"'>GitHub issue</a>";var commentsDiv=document.getElementById("comments");let xhr=new XMLHttpRequest();xhr.responseType="json";xhr.open("GET",api_url);xhr.setRequestHeader("Accept","application/vnd.github.v3.html+json");xhr.send();xhr.onload=function()
+{if(xhr.status!=200)
+{let errorText=document.createElement("p");errorText.innerHTML="<i>Comments for this post are not opened yet (or you have GitHub scripts disabled).</i>";commentsDiv.appendChild(errorText);}
+else
+{let comments=xhr.response;let mainHeader=document.createElement("h2");mainHeader.innerHTML="Comments: ".concat(comments.length);commentsDiv.appendChild(mainHeader);let issueLink=document.createElement("p");issueLink.innerHTML="<i>You can leave a comment using this <b>"+link+"</b>.</i>";commentsDiv.appendChild(issueLink);comments.forEach(function(comment)
+{let commentContent=document.createElement("div");commentContent.setAttribute('class','gh-comment')
+commentContent.innerHTML="".concat("<div class='gh-header'>","<img src='",comment.user.avatar_url,"' />","<div style='margin:auto 0;'>","<b><a class='gh-username' href='",comment.user.html_url,"'>",comment.user.login,"</a></b>"," commented at <em>",new Date(comment.created_at).toUTCString(),"</em>","</div>","</div>","<div class='gh-body'>",comment.body_html,"</div>");commentsDiv.appendChild(commentContent);});}};xhr.onerror=function()
+{let errorText=document.createElement("p");errorText.innerHTML="<i>Looks like the GitHub API limit exceeded! Go to "+link+" directly or wait 60 minutes to reset limits.</i>";commentsDiv.appendChild(errorText);};}</script></div></div><aside class=sidebar><div class="widget-categories widget"><h4 class=widget__title>Bitboard viewer</h4><div class=widget__content><a href=https://tearth.dev/bitboard-viewer/ alt="Bitboard viewer">https://tearth.dev/bitboard-viewer/</a></div></div><div class="widget-categories widget"><h4 class=widget__title>Chess engines</h4><div class=widget__content><ul class=widget__list><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Inanis><span class=project-title>Inanis</span> - the strongest one, under development</a><div class=project-details><b>Elo: 2850</b>, Language: Rust, SLOC: 10000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Cosette><span class=project-title>Cosette</span> - one of the best .NET engines</a><div class=project-details><b>Elo: 2500</b>, Language: C#, SLOC: 12000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Proxima-b-2.0><span class=project-title>Proxima b 2.0</span> - made as part of BSc Thesis</a><div class=project-details><b>Elo: 1600</b>, Language: C#, SLOC: 10000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Proxima-b><span class=project-title>Proxima b 1.0</span> - the weakest and simplest one</a><div class=project-details><b>Elo: 1000</b>, Language: C++, SLOC: 4000</div></li></ul></div></div><div class="widget-categories widget"><h4 class=widget__title>Other projects</h4><div class=widget__content><ul class=widget__list><li class=widget__item><a class=widget__link href=https://github.com/skni-kod/MicrOS><span class=project-title>MicrOS</span> - 32-bit operating system</a><div class=project-details>Language: C, Assembly. SLOC: 40000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/Lemao><span class=project-title>Lemao</span> - game engine made from scratch</a><div class=project-details>Language: Rust. SLOC: 15000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/InElonWeTrust><span class=project-title>InElonWeTrust</span> - SpaceX Discord bot</a><div class=project-details>Language: C#. SLOC: 6000</div></li><li class=widget__item><a class=widget__link href=https://github.com/Tearth/DotNet6502><span class=project-title>DotNet6502</span> - modular MOS 6502 emulator</a><div class=project-details>Language: C#. SLOC: 6000</div></li><li class=widget__item><a class=widget__link href="https://github.com/Tearth?tab=repositories">Full list of repositories</a></li></ul></div></div><div class="widget-categories widget"><h4 class=widget__title>Nuget packages</h4><div class=widget__content><ul class=widget__list><li class=widget__item><div><a class=widget__link href=https://github.com/Tearth/Oddity><span class=project-title>Oddity</span> - unofficial SpaceX API wrapper</a></div><div><a href=https://travis-ci.org/github/Tearth/Oddity><img src="https://img.shields.io/travis/Tearth/Oddity/master?style=flat-square&logo=travis-ci&logoColor=white&cacheSeconds=3600" alt="Oddity build"></a>
+<a href=https://www.nuget.org/packages/Oddity/><img src="https://img.shields.io/nuget/dt/Oddity.svg?style=flat-square&logo=nuget&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt="Oddity Nuget"></a>
+<a href=https://github.com/Tearth/Oddity/stargazers><img src="https://img.shields.io/github/stars/Tearth/Oddity.svg?style=flat-square&logo=github&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt="Oddity stargazers"></a></div><div class=project-details>Language: C#. SLOC: 3000</div></li><li class=widget__item><div><a class=widget__link href=https://github.com/Tearth/.NET-Launch-Dashboard><span class=project-title>.NET Launch Dashboard</span> - rocket telemetry</a></div><div><a href=https://travis-ci.org/github/Tearth/.NET-Launch-Dashboard><img src="https://img.shields.io/travis/Tearth/.NET-Launch-Dashboard/master?style=flat-square&logo=travis-ci&logoColor=white&cacheSeconds=3600" alt=".NET-Launch-Dashboard build"></a>
+<a href=https://www.nuget.org/packages/DotNetLaunchDashboard/><img src="https://img.shields.io/nuget/dt/DotNetLaunchDashboard.svg?style=flat-square&logo=nuget&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt=".NET-Launch-Dashboard Nuget"></a>
+<a href=https://github.com/Tearth/.NET-Launch-Dashboard/stargazers><img src="https://img.shields.io/github/stars/Tearth/.NET-Launch-Dashboard.svg?style=flat-square&logo=github&cacheSeconds=3600&color=rgb%2815%2c%20120%2c%20180%29" alt=".NET-Launch-Dashboard stargazers"></a></div><div class=project-details>Language: C#. SLOC: 500</div></li></ul></div></div><div class="widget-categories widget"><h4 class=widget__title>Categories</h4><div class=widget__content><ul class=widget__list><li class=widget__item><a class=widget__link href=/categories/.net-internals/>.NET internals (6)</a></li><li class=widget__item><a class=widget__link href=/categories/chess-engines/>Chess engines (9)</a></li><li class=widget__item><a class=widget__link href=/categories/performance-comparisons/>Performance comparisons (4)</a></li></ul></div></div><div class="widget-taglist widget"><h4 class=widget__title>Tags</h4><div class=widget__content><a class="widget-taglist__link widget__link btn" href=/tags/.net/ title=.NET>.NET (9)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/.net-5/ title=".NET 5">.NET 5 (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/.net-core/ title=".NET Core">.NET Core (8)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/.net-framework/ title=".NET Framework">.NET Framework (3)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/assembly/ title=Assembly>Assembly (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/bmi/ title=BMI>BMI (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/c++/ title=C++>C++ (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/chess/ title=Chess>Chess (9)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/clr/ title=CLR>CLR (2)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/gethashcode/ title=GetHashCode>GetHashCode (2)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/inanis/ title=Inanis>Inanis (5)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/random/ title=Random>Random (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/releases/ title=Releases>Releases (5)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/testing/ title=Testing>Testing (1)</a>
+<a class="widget-taglist__link widget__link btn" href=/tags/tuples/ title=Tuples>Tuples (1)</a></div></div><div class="widget-social widget"><h4 class="widget-social__title widget__title">Social</h4><div class="widget-social__content widget__content"><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=GitHub rel="noopener noreferrer" href=https://github.com/Tearth target=_blank><svg class="widget-social__link-icon icon icon-github" width="24" height="24" viewBox="0 0 384 374"><path d="m192 0C85.9.0.0 85.8.0 191.7c0 84.7 55 156.6 131.3 181.9 9.6 1.8 13.1-4.2 13.1-9.2.0-4.6-.2-16.6-.3-32.6-53.4 11.6-64.7-25.7-64.7-25.7-8.7-22.1-21.3-28-21.3-28-17.4-11.9 1.3-11.6 1.3-11.6 19.3 1.4 29.4 19.8 29.4 19.8 17.1 29.3 44.9 20.8 55.9 15.9 1.7-12.4 6.7-20.8 12.2-25.6-42.6-4.8-87.5-21.3-87.5-94.8.0-20.9 7.5-38 19.8-51.4-2-4.9-8.6-24.3 1.9-50.7.0.0 16.1-5.2 52.8 19.7 15.3-4.2 31.7-6.4 48.1-6.5 16.3.1 32.7 2.2 48.1 6.5 36.7-24.8 52.8-19.7 52.8-19.7 10.5 26.4 3.9 45.9 1.9 50.7 12.3 13.4 19.7 30.5 19.7 51.4.0 73.7-44.9 89.9-87.7 94.6 6.9 5.9 13 17.6 13 35.5.0 25.6-.2 46.3-.2 52.6.0 5.1 3.5 11.1 13.2 9.2 76.2-25.5 131.2-97.3 131.2-182 0-105.9-86-191.7-192-191.7z"/></svg><span>GitHub</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Twitter rel="noopener noreferrer" href=https://twitter.com/TearthDev target=_blank><svg class="widget-social__link-icon icon icon-twitter" width="24" height="24" viewBox="0 0 384 312"><path d="m384 36.9c-14.1 6.3-29.3 10.5-45.2 12.4 16.3-9.7 28.8-25.2 34.6-43.6-15.2 9-32.1 15.6-50 19.1-14.4-15.2-34.9-24.8-57.5-24.8-43.5.0-78.8 35.3-78.8 78.8.0 6.2.7 12.2 2 17.9-65.5-3.3-123.5-34.6-162.4-82.3-6.7 11.6-10.6 25.2-10.6 39.6.0 27.3 13.9 51.4 35 65.6-12.9-.4-25.1-4-35.7-9.9v1c0 38.2 27.2 70 63.2 77.2-6.6 1.8-13.6 2.8-20.8 2.8-5.1.0-10-.5-14.8-1.4 10 31.3 39.1 54.1 73.6 54.7-27 21.1-60.9 33.7-97.8 33.7-6.4.0-12.6-.4-18.8-1.1 34.9 22.4 76.3 35.4 120.8 35.4 144.9.0 224.1-120 224.1-224.1.0-3.4-.1-6.8-.2-10.2 15.4-11.1 28.7-25 39.3-40.8z"/></svg><span>Twitter</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Lichess rel="noopener noreferrer" href=https://lichess.org/@/Tearth target=_blank><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="widget-social__link-icon icon icon-lichess" width="24" height="24" viewBox="2 3 21 21"><g id="surface1"><path style="fill-rule:evenodd;fill:#fff;fill-opacity:1;stroke-width:0" d="M22.001953 9.997559C32.497559 11.000977 38.503418 18.00293 37.998047 39.001465H15C15 30 24.997559 32.497559 22.998047 18.00293" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#fff;fill-opacity:1;stroke-width:0" d="M24.001465 18.00293C24.382324 20.910645 18.449707 25.371094 16.003418 26.99707 13.000488 28.996582 13.183594 31.340332 11.000977 31.003418 9.960938 30.058594 12.407227 27.956543 11.000977 28.000488 9.997559 28.000488 11.191406 29.230957 9.997559 30 9.001465 30 5.998535 31.003418 5.998535 26.000977 5.998535 24.001465 11.99707 13.996582 11.99707 13.996582S13.886719 12.099609 13.996582 10.50293C13.271484 9.506836 13.498535 8.503418 13.498535 7.5 14.501953 6.496582 16.501465 9.997559 16.501465 9.997559H18.500977S19.277344 8.005371 20.998535 7.001953L22.001953 9.997559" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#000;fill-opacity:1;stroke-width:0" d="M9.499512 25.50293C9.499512 25.773926 9.279785 26.000977 9.001465 26.000977 8.723145 26.000977 8.503418 25.773926 8.503418 25.50293 8.503418 25.224609 8.723145 24.997559 9.001465 24.997559 9.279785 24.997559 9.499512 25.224609 9.499512 25.50293zm0 0" transform="matrix(0.533333,0,0,0.533333,0,0)"/><path style="fill-rule:evenodd;fill:#000;fill-opacity:1;stroke-width:0" d="M14.999472 15.496922C14.996821 16.32729 14.774506 16.996929 14.499265 17.003609 14.226704 17.000284 13.999306 16.328111 14.001958 15.497742 13.998266 14.671036 14.22058 14.001397 14.499484 14.00106 14.778388 14.000723 14.995781 14.670215 14.999472 15.496922zm0 0" transform="matrix(0.461867,0.266667,-0.266667,0.461867,5.1696,-2.758933)"/></g></svg><span>Lichess</span></a></div><div class="widget-social__item widget__item"><a class="widget-social__link widget__link btn" title=Email href=mailto:tearthdev@gmail.com><svg class="widget-social__link-icon icon icon-mail" width="24" height="24" viewBox="0 0 416 288"><path d="m0 16v256 16h16 384 16v-16V16 0h-16H16 0zm347 16-139 92.5L69 32zM199 157.5l9 5.5 9-5.5L384 46v210H32V46z"/></svg><span>tearthdev@gmail.com</span></a></div></div></div></aside></div><footer class=footer><div class="container footer__container flex"><div class=footer__copyright>&copy; 2024 Tearth.
+<span class=footer__copyright-credits>Generated with <a href=https://gohugo.io/ rel="nofollow noopener" target=_blank>Hugo</a> and <a href=https://github.com/Vimux/Mainroad/ rel="nofollow noopener" target=_blank>Mainroad</a> theme, hosted on <a href=https://pages.github.com/ rel="nofollow noopener" target=_blank>pages.github.com</a>.</span></div></div></footer></div></body></html>
