@@ -1,0 +1,59 @@
+baseURL = "https://tearth.dev/"
+languageCode = "en-us"
+title = "Tearth's homepage"
+paginate = "6" # Number of posts per page
+theme = "mainroad"
+disqusShortname = "" # Enable Disqus comments by entering your Disqus shortname
+googleAnalytics = "UA-167505664-1" # Enable Google Analytics by entering your tracking id
+pygmentsUseClasses = true
+pygmentsCodefences = true
+
+[Author] # Used in authorbox
+  name = "Tearth"
+  bio = "C# programmer. After hours I enjoy writing chess engines, reading about history, space exploration and playing simulators or strategy games. I miss space shuttles."
+  avatar = "https://github.com/Tearth.png"
+
+[Params]
+  subtitle = "Loosely updated site about everything I enjoy" # Subtitle of your site. Used in site header
+  description = "Tearth's personal homepage: .NET, Rust, chess engines, low-level programming and others." # Site description. Used in meta description
+  copyright = "Tearth" # Footer copyright holder, otherwise will use site title
+  opengraph = true # Enable OpenGraph if true
+  schema = false # Enable Schema
+  twitter_cards = true # Enable Twitter Cards if true
+  readmore = true # Show "Read more" button in list if true
+  authorbox = true # Show authorbox at bottom of pages if true
+  toc = true # Enable Table of Contents
+  pager = true # Show pager navigation (prev/next links) at the bottom of pages if true
+  post_meta = ["date", "categories", "translations"] # Order of post meta information
+  mainSections = ["posts"] # Specify section pages to show on home page and the "Recent articles" widget
+  dateformat = "2006-01-02" # Change the format of dates
+  mathjax = false # Enable MathJax
+  mathjaxPath = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.6/MathJax.js" # Specify MathJax path
+  mathjaxConfig = "TeX-AMS-MML_HTMLorMML" # Specify MathJax config
+  backgroundColor = "rgb(4, 45, 70)"
+  highlightColor = "rgb(7, 80, 115)" # Override highlight color
+  badgeColor = "rgb(15, 120, 180)"
+  badgeStyle = "flat-square"
+  badgeCacheTime = 3600
+  user_name = "tearth"
+	repo_name = "tearth.github.io"
+  images = [ "img/card.jpg" ]
+
+[Params.sidebar]
+  home = "right" # Configure layout for home page
+  list = "right"  # Configure layout for list pages
+  single = false # Configure layout for single pages
+  # Enable widgets in given order
+  widgets = ["bitboard-viewer", "chess-engines", "other-projects", "nuget-packages", "categories", "taglist", "social"]
+
+[Params.widgets]
+  recent_num = 5 # Set the number of articles in the "Recent articles" widget
+  tags_counter = true # Enable counter for each tag in "Tags" widget
+  categories_counter = true # Enable counter for each category in "Categories" widget
+
+[Params.widgets.social]
+  # Enable parts of social widget
+  twitter = "TearthDev"
+  github = "Tearth"
+  email = "tearthdev@gmail.com"
+  lichess = "Tearth"
