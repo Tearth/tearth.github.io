@@ -10,7 +10,6 @@ tags:
   - "C++"
   - "Assembly"
   - "BMI"
-issue: 2
 sidebar: "right"
 ---
 

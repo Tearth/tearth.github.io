@@ -7,7 +7,6 @@ categories:
 tags:
   - ".NET"
   - ".NET 5"
-issue: 9
 sidebar: "right"
 ---
 

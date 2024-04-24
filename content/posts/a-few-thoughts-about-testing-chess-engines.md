@@ -7,7 +7,6 @@ categories:
 tags:
   - "Chess"
   - "Testing"
-issue: 14
 sidebar: "right"
 ---
 

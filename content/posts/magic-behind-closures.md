@@ -7,7 +7,6 @@ categories:
 tags:
   - ".NET"
   - ".NET Core"
-issue: 5
 sidebar: "right"
 ---
 

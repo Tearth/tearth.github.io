@@ -8,7 +8,6 @@ tags:
   - "Chess"
   - "Releases"
   - "Inanis"
-issue: 13
 sidebar: "right"
 ---
 

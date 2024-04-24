@@ -6,7 +6,6 @@ categories:
   - "Chess engines"
 tags:
   - "Chess"
-issue: 10
 sidebar: "right"
 ---
 

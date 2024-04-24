@@ -10,7 +10,6 @@ tags:
   - ".NET Core"
   - "CLR"
   - "GetHashCode"
-issue: 4
 sidebar: "right"
 ---
 

@@ -29,12 +29,4 @@
 {{ partial "authorbox.html" . }}
 {{ partial "pager.html" . }}
 
-<div id="comments">
-{{ with .Params.issue }}
-	{{ partial "comments.html" $ }}
-{{ else }}
-	{{ template "_internal/disqus.html" . }}
-{{ end }}
-</div>
-
 {{ end }}

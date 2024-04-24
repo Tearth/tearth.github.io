@@ -9,7 +9,6 @@ tags:
   - ".NET Core"
   - ".NET Framework"
   - "Chess"
-issue: 11
 sidebar: "right"
 ---
 

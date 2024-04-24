@@ -10,7 +10,6 @@ tags:
   - ".NET Framework"
   - ".NET Core"
   - "Random"
-issue: 6
 sidebar: "right"
 ---
 

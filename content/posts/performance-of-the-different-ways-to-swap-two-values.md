@@ -9,7 +9,6 @@ tags:
   - ".NET"
   - ".NET Core"
   - "Tuples"
-issue: 7
 sidebar: "right"
 ---
 
