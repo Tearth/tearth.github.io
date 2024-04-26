@@ -14,11 +14,11 @@ My adventure with chess engine development started a good few years ago, and one
 
 <!--more-->
 
-## Manual testing is inaccurate
+## Manual testing
 
 [Proxima b](https://github.com/Tearth/Proxima-b), my first chess engine and the simplest one at the same time, wasn't implementing any useful protocol for chess GUIs like Arena. It had its own graphical interface with different modes (Player vs AI, AI vs AI, AI vs FICS), so the only way to test it (I skip AI vs FICS mode for now) was manually playing games. As you can imagine, it was very unreliable because depended not only on the engine performance but also on mine, so while it might work for very simple programs where introducing major algorithms like alpha-beta can indeed show a very noticeable difference, it's pretty much useless for a more fine-tuning.
 
-## Testing based on Internet servers is unreliable
+## Internet chess servers
 
 Both [Proxima b](https://github.com/Tearth/Proxima-b) and [Proxima b 2.0](https://github.com/Tearth/Proxima-b-2.0) had the ability to connect to the [FICS](https://www.freechess.org/) (Free Internet Chess Server) - that was the time when [lichess.org](https://lichess.org/) didn't have open API yet, so it was the only way known for me to play through a network. While it was a great way to observe playing them live, you can easily observe on the chart below how dynamic and unpredictable ratings can be:
 
@@ -36,15 +36,13 @@ caption="Cosette rating on lichess between Aug 2020 and Dec 2021" >}}
 
 Another problem is that the pool (so all opponents) is also constantly changing, which can lead to inflating or deflating the engine's rating, even when there were no changes. This can be also seen on the image above since Cosette wasn't really updated in a long time before the bot was shut down permanently, and still, Elo was slowly rising.
 
-## Self-play can be a trap
+## Self-play caveats
 
 Testing based on a self-playing, so running the engine against its older version, is one of the more popular ways to test changes. This was also my main approach during [Cosette](https://github.com/Tearth/Cosette) development (where I even made my own application called Arbiter), and while it worked, it had also two main disadvantages:
  - rating differences are often very exaggerated: because both players are the same engine (usually with some minor difference), they are prone to exploit weaknesses in the evaluation function or search itself
  - a change which worked here, might not perform well at all when playing with other opponents which have a different evaluation and search features
 
-In the last year, I've almost completely abandoned this method, since gauntlet is much better and more reliable (look below) - having at least a few different engines in the tournament very well protects against such exploits.
-
-## So how do I test?
+## Gauntlet tournaments
 
 First of all, I use [cutechess-cli](https://github.com/cutechess/cutechess) which is probably one of the best testing applications - it's running without any GUI, so I can leave it on my VPS for multiple hours. The command below is my main way to test changes in [Inanis](https://github.com/Tearth/Inanis), so I will explain below what every option does and why it's important.
 
@@ -86,9 +84,9 @@ caption="Example test done after 20204 games" >}}
 
 One more important thing is how to select good sparring partners. As you can see on the image above, all opponents of Inanis DEV are weaker at this point, due to the constant improving my engine. The general rule is, the difference between both engines should be less than 200 Elo, ideally less than 100 Elo, to get the most reliable results. I'm usually just going through [CCRL Blitz list](https://ccrl.chessdom.com/ccrl/404/) to pick the best ones, with the help of [sdchess](http://www.sdchess.ru/download_engines.htm).
 
-## You didn't mention about SPRT!
+## Sequential Probability Ratio Test
 
-One of the criticisms I got after writing this article was: why originally I didn't mention about method which is widely used to test changes: Sequential Probability Ratio Test (SPRT). As I wrote in the earlier sections, I don't trust self-plays and gauntlets are giving much better impression of how some change influenced the engine's strength. I will not describe the whole methodology here, an author of the [Rustic engine](https://github.com/mvanthoor/rustic) did an excellent job: https://rustic-chess.org/progress/sprt_testing.html.
+[WORK IN PROGRESS]
 
 ## Summary
 
