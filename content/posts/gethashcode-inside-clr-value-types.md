@@ -7,7 +7,6 @@ categories:
   - "Performance comparisons"
 tags:
   - ".NET"
-  - ".NET Core"
   - "CLR"
   - "GetHashCode"
 sidebar: "right"

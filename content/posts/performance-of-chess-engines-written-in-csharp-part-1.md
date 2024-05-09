@@ -6,8 +6,6 @@ categories:
   - "Chess engines"
 tags:
   - ".NET"
-  - ".NET Core"
-  - ".NET Framework"
   - "Chess"
 sidebar: "right"
 ---

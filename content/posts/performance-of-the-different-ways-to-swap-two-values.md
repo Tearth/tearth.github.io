@@ -7,8 +7,6 @@ categories:
   - "Performance comparisons"
 tags:
   - ".NET"
-  - ".NET Core"
-  - "Tuples"
 sidebar: "right"
 ---
 

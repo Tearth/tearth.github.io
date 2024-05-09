@@ -6,7 +6,6 @@ categories:
   - "Performance comparisons"
 tags:
   - ".NET"
-  - ".NET Core"
   - "Rust"
   - "Assembly"
   - "BMI"

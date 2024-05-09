@@ -7,9 +7,6 @@ categories:
   - "Performance comparisons"
 tags:
   - ".NET"
-  - ".NET Framework"
-  - ".NET Core"
-  - "Random"
 sidebar: "right"
 ---
 

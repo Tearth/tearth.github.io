@@ -6,7 +6,6 @@ categories:
   - ".NET internals"
 tags:
   - ".NET"
-  - ".NET 5"
 sidebar: "right"
 ---
 
